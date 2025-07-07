@@ -1,112 +1,217 @@
-name: Code Execution Workflow
+name: 代码执行工作流
+
 on:
   workflow_dispatch:
     inputs:
-      language:
-        description: 'Programming language (cpp, python, java)'
+      filename:
+        description: '文件名 (如 solution.cpp, Main.java, script.py)'
         required: true
       code:
-        description: 'Source code to execute'
+        description: '源代码内容'
         required: true
       input:
-        description: 'Input for the program'
+        description: '程序输入'
         required: false
         default: ''
       expected:
-        description: 'Expected output for comparison'
+        description: '预期输出 (用于验证)'
         required: false
         default: ''
 
 jobs:
-  execute-code:
+  execute:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-      
-      - name: Setup execution environment
+      - name: 检出仓库
+        uses: actions/checkout@v3
+        
+      - name: 设置环境
         run: |
-          # Setup based on language
-          if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            sudo apt-get update && sudo apt-get install -y g++
-          elif [ "${{ github.event.inputs.language }}" == "java" ]; then
-            sudo apt-get update && sudo apt-get install -y openjdk-17-jdk
-          elif [ "${{ github.event.inputs.language }}" == "python" ]; then
-            sudo apt-get update && sudo apt-get install -y python3
+          sudo apt-get update
+          
+          # 根据文件名确定语言
+          FILENAME="${{ github.event.inputs.filename }}"
+          if [[ $FILENAME == *.cpp ]]; then
+            echo "LANGUAGE=cpp" >> $GITHUB_ENV
+            sudo apt-get install -y g++ time
+          elif [[ $FILENAME == *.java ]]; then
+            echo "LANGUAGE=java" >> $GITHUB_ENV
+            sudo apt-get install -y openjdk-17-jdk time
+          elif [[ $FILENAME == *.py ]]; then
+            echo "LANGUAGE=python" >> $GITHUB_ENV
+            sudo apt-get install -y python3 time
           fi
-      
-      - name: Create files
+          
+      - name: 创建文件
         run: |
-          echo '${{ github.event.inputs.code }}' > source.${{ github.event.inputs.language }}
+          echo '${{ github.event.inputs.code }}' > ${{ github.event.inputs.filename }}
           echo '${{ github.event.inputs.input }}' > input.txt
-      
-      - name: Compile and run
+          
+      - name: 执行代码
         id: execute
-        continue-on-error: true
-        timeout-minutes: 2
         run: |
-          start_time=$(date +%s%N)
-          status="AC"
-          error_msg=""
+          STATUS="AC"  # 默认为Accepted
+          ERROR_MSG=""
+          OUTPUT=""
+          TIME=0
+          MEMORY=0
           
-          if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            g++ -o program source.cpp 2> compile_error.txt
+          # C++ 编译和执行
+          if [ "${{ env.LANGUAGE }}" == "cpp" ]; then
+            # 编译
+            g++ -std=c++17 ${{ github.event.inputs.filename }} -o program 2> compile_error.txt
             if [ $? -ne 0 ]; then
-              status="CE"
-              error_msg=$(cat compile_error.txt)
+              STATUS="CE"
+              ERROR_MSG=$(cat compile_error.txt)
             else
-              /usr/bin/time -f "%M" -o memory.txt ./program < input.txt > output.txt 2> runtime_error.txt
-              if [ $? -ne 0 ]; then
-                status="RE"
-                error_msg=$(cat runtime_error.txt)
+              # 执行，带超时和内存监控
+              /usr/bin/time -f "%e %M" -o time_memory.txt timeout 2s ./program < input.txt > output.txt 2> runtime_error.txt
+              EXIT_CODE=$?
+              
+              if [ $EXIT_CODE -eq 124 ]; then
+                STATUS="TLE"
+              elif [ $EXIT_CODE -ne 0 ]; then
+                STATUS="RE"
+                ERROR_MSG=$(cat runtime_error.txt)
+              else
+                # 检查内存使用
+                if [ -f time_memory.txt ]; then
+                  TIME=$(awk '{print $1}' time_memory.txt)
+                  MEMORY=$(awk '{print $2}' time_memory.txt)
+                  
+                  if [ $(echo "$MEMORY > 512000" | bc) -eq 1 ]; then
+                    STATUS="MLE"
+                  fi
+                fi
+                
+                # 检查预期输出
+                if [ "${{ github.event.inputs.expected }}" != "" ]; then
+                  OUTPUT=$(cat output.txt)
+                  EXPECTED="${{ github.event.inputs.expected }}"
+                  if [ "$OUTPUT" != "$EXPECTED" ]; then
+                    STATUS="WA"
+                  fi
+                fi
               fi
             fi
-          # Similar blocks for Java and Python
-          fi
           
-          end_time=$(date +%s%N)
-          execution_time=$((($end_time - $start_time)/1000000))
-          
-          # Check time limit
-          if [ $execution_time -gt 2000 ] && [ "$status" == "AC" ]; then
-            status="TLE"
-          fi
-          
-          # Check memory limit if available
-          if [ -f memory.txt ] && [ "$status" == "AC" ]; then
-            memory=$(cat memory.txt)
-            if [ $memory -gt 512000 ]; then
-              status="MLE"
+          # Java 编译和执行
+          elif [ "${{ env.LANGUAGE }}" == "java" ]; then
+            # 提取类名
+            CLASS_NAME=$(basename ${{ github.event.inputs.filename }} .java)
+            
+            # 编译
+            javac ${{ github.event.inputs.filename }} 2> compile_error.txt
+            if [ $? -ne 0 ]; then
+              STATUS="CE"
+              ERROR_MSG=$(cat compile_error.txt)
+            else
+              # 执行，带超时和内存监控
+              /usr/bin/time -f "%e %M" -o time_memory.txt timeout 2s java $CLASS_NAME < input.txt > output.txt 2> runtime_error.txt
+              EXIT_CODE=$?
+              
+              if [ $EXIT_CODE -eq 124 ]; then
+                STATUS="TLE"
+              elif [ $EXIT_CODE -ne 0 ]; then
+                STATUS="RE"
+                ERROR_MSG=$(cat runtime_error.txt)
+              else
+                # 检查内存使用
+                if [ -f time_memory.txt ]; then
+                  TIME=$(awk '{print $1}' time_memory.txt)
+                  MEMORY=$(awk '{print $2}' time_memory.txt)
+                  
+                  if [ $(echo "$MEMORY > 512000" | bc) -eq 1 ]; then
+                    STATUS="MLE"
+                  fi
+                fi
+                
+                # 检查预期输出
+                if [ "${{ github.event.inputs.expected }}" != "" ]; then
+                  OUTPUT=$(cat output.txt)
+                  EXPECTED="${{ github.event.inputs.expected }}"
+                  if [ "$OUTPUT" != "$EXPECTED" ]; then
+                    STATUS="WA"
+                  fi
+                fi
+              fi
             fi
-          fi
           
-          # Check if output matches expected
-          if [ "$status" == "AC" ]; then
-            if [ "${{ github.event.inputs.expected }}" != "" ]; then
-              if ! diff -w output.txt <(echo '${{ github.event.inputs.expected }}') > /dev/null; then
-                status="WA"
+          # Python 执行
+          elif [ "${{ env.LANGUAGE }}" == "python" ]; then
+            # Python无需编译，直接执行
+            /usr/bin/time -f "%e %M" -o time_memory.txt timeout 2s python3 ${{ github.event.inputs.filename }} < input.txt > output.txt 2> runtime_error.txt
+            EXIT_CODE=$?
+            
+            if [ $EXIT_CODE -eq 124 ]; then
+              STATUS="TLE"
+            elif [ $EXIT_CODE -ne 0 ]; then
+              STATUS="RE"
+              ERROR_MSG=$(cat runtime_error.txt)
+            else
+              # 检查内存使用
+              if [ -f time_memory.txt ]; then
+                TIME=$(awk '{print $1}' time_memory.txt)
+                MEMORY=$(awk '{print $2}' time_memory.txt)
+                
+                if [ $(echo "$MEMORY > 512000" | bc) -eq 1 ]; then
+                  STATUS="MLE"
+                fi
+              fi
+              
+              # 检查预期输出
+              if [ "${{ github.event.inputs.expected }}" != "" ]; then
+                OUTPUT=$(cat output.txt)
+                EXPECTED="${{ github.event.inputs.expected }}"
+                if [ "$OUTPUT" != "$EXPECTED" ]; then
+                  STATUS="WA"
+                fi
               fi
             fi
           fi
           
-          echo "STATUS=$status" >> $GITHUB_OUTPUT
-          echo "EXECUTION_TIME=$execution_time" >> $GITHUB_OUTPUT
+          # 读取输出
           if [ -f output.txt ]; then
-            output=$(cat output.txt)
-            echo "OUTPUT<<EOF" >> $GITHUB_OUTPUT
-            echo "$output" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
+            OUTPUT=$(cat output.txt)
           fi
-          if [ -n "$error_msg" ]; then
-            echo "ERROR_MSG<<EOF" >> $GITHUB_OUTPUT
-            echo "$error_msg" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Set result
+          
+          # 输出结果到GITHUB_OUTPUT
+          echo "status=$STATUS" >> $GITHUB_OUTPUT
+          echo "time=$TIME" >> $GITHUB_OUTPUT
+          echo "memory=$MEMORY" >> $GITHUB_OUTPUT
+          
+          # 多行输出需要特殊处理
+          echo "error<<EOF" >> $GITHUB_OUTPUT
+          echo "$ERROR_MSG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          echo "output<<EOF" >> $GITHUB_OUTPUT
+          echo "$OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+      - name: 显示结果
         run: |
-          echo "::set-output name=result::${{ steps.execute.outputs.STATUS }}"
-          echo "::set-output name=output::${{ steps.execute.outputs.OUTPUT }}"
-          echo "::set-output name=error::${{ steps.execute.outputs.ERROR_MSG }}"
-          echo "::set-output name=execution_time::${{ steps.execute.outputs.EXECUTION_TIME }}"
+          echo "## 执行结果" >> $GITHUB_STEP_SUMMARY
+          echo "- **状态**: ${{ steps.execute.outputs.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **执行时间**: ${{ steps.execute.outputs.time }}秒" >> $GITHUB_STEP_SUMMARY
+          echo "- **内存使用**: ${{ steps.execute.outputs.memory }}KB" >> $GITHUB_STEP_SUMMARY
+          
+          if [[ "${{ steps.execute.outputs.error }}" != "" ]]; then
+            echo "- **错误信息**:" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.execute.outputs.error }}" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "- **程序输出**:" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.execute.outputs.output }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          
+          # 打印到控制台
+          echo "执行状态: ${{ steps.execute.outputs.status }}"
+          echo "执行时间: ${{ steps.execute.outputs.time }}秒"
+          echo "内存使用: ${{ steps.execute.outputs.memory }}KB"
+          echo "程序输出: ${{ steps.execute.outputs.output }}"
