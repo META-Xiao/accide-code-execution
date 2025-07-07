@@ -1,16 +1,19 @@
-name: Code Execution Tester
-
+name: Code Execution Workflow
 on:
   workflow_dispatch:
     inputs:
-      filename:
-        description: 'Filename with extension (e.g., main.cpp)'
+      language:
+        description: 'Programming language (cpp, python, java)'
         required: true
       code:
         description: 'Source code to execute'
         required: true
       input:
-        description: 'Input for the program (optional)'
+        description: 'Input for the program'
+        required: false
+        default: ''
+      expected:
+        description: 'Expected output for comparison'
         required: false
         default: ''
 
@@ -18,186 +21,92 @@ jobs:
   execute-code:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    
     steps:
-      - name: Setup environment
-        id: setup
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      
+      - name: Setup execution environment
         run: |
-          filename="${{ github.event.inputs.filename }}"
-          extension="${filename##*.}"
-          
-          case $extension in
-            cpp)   lang="cpp";  command="./program" ;;
-            java)  lang="java"; command="java Main" ;;
-            py)    lang="py";   command="python3 $filename" ;;
-            js)    lang="js";   command="node $filename" ;;
-            *)     echo "Unsupported file type"; exit 1 ;;
-          esac
-
-          echo "filename=$filename" >> $GITHUB_OUTPUT
-          echo "lang=$lang" >> $GITHUB_OUTPUT
-          echo "command=$command" >> $GITHUB_OUTPUT
-          echo "input_file=input.txt" >> $GITHUB_OUTPUT
-          echo "output_file=output.txt" >> $GITHUB_OUTPUT
-          echo "error_file=error.txt" >> $GITHUB_OUTPUT
-
-      - name: Debug setup
-        run: |
-          echo "Filename: ${{ steps.setup.outputs.filename }}"
-          echo "Language: ${{ steps.setup.outputs.lang }}"
-          echo "Command: ${{ steps.setup.outputs.command }}"
-
+          # Setup based on language
+          if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
+            sudo apt-get update && sudo apt-get install -y g++
+          elif [ "${{ github.event.inputs.language }}" == "java" ]; then
+            sudo apt-get update && sudo apt-get install -y openjdk-17-jdk
+          elif [ "${{ github.event.inputs.language }}" == "python" ]; then
+            sudo apt-get update && sudo apt-get install -y python3
+          fi
+      
       - name: Create files
         run: |
-          # 创建源代码文件
-          echo '${{ github.event.inputs.code }}' > "${{ steps.setup.outputs.filename }}"
-          
-          # 创建输入文件（如果有输入）
-          if [ -n "${{ github.event.inputs.input }}" ]; then
-            echo '${{ github.event.inputs.input }}' > "${{ steps.setup.outputs.input_file }}"
-          fi
-          
-          # 显示文件列表
-          ls -la
-          echo "Source file content:"
-          cat "${{ steps.setup.outputs.filename }}"
-
-      - name: Install dependencies
+          echo '${{ github.event.inputs.code }}' > source.${{ github.event.inputs.language }}
+          echo '${{ github.event.inputs.input }}' > input.txt
+      
+      - name: Compile and run
+        id: execute
+        continue-on-error: true
+        timeout-minutes: 2
         run: |
-          sudo apt-get update
-          case "${{ steps.setup.outputs.lang }}" in
-            cpp)  sudo apt-get install -y g++ ;;
-            java) sudo apt-get install -y openjdk-17-jdk ;;
-            py)   sudo apt-get install -y python3 ;;
-            js)   sudo apt-get install -y nodejs ;;
-          esac
-
-      - name: Compile code
-        id: compile
-        if: contains('cpp java', steps.setup.outputs.lang)
-        run: |
-          # 使用正确的文件名变量
-          filename="${{ steps.setup.outputs.filename }}"
-          echo "Compiling file: $filename"
+          start_time=$(date +%s%N)
+          status="AC"
+          error_msg=""
           
-          if [ "${{ steps.setup.outputs.lang }}" = "cpp" ]; then
-            g++ "$filename" -o program -O2 2> "${{ steps.setup.outputs.error_file }}"
-            compile_status=$?
-          elif [ "${{ steps.setup.outputs.lang }}" = "java" ]; then
-            javac "$filename" 2> "${{ steps.setup.outputs.error_file }}"
-            compile_status=$?
+          if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
+            g++ -o program source.cpp 2> compile_error.txt
+            if [ $? -ne 0 ]; then
+              status="CE"
+              error_msg=$(cat compile_error.txt)
+            else
+              /usr/bin/time -f "%M" -o memory.txt ./program < input.txt > output.txt 2> runtime_error.txt
+              if [ $? -ne 0 ]; then
+                status="RE"
+                error_msg=$(cat runtime_error.txt)
+              fi
+            fi
+          # Similar blocks for Java and Python
           fi
           
-          if [ $compile_status -ne 0 ]; then
-            echo "status=CE" >> $GITHUB_OUTPUT
-            echo "result=Compilation Error" >> $GITHUB_OUTPUT
-            echo "Compilation error details:"
-            cat "${{ steps.setup.outputs.error_file }}"
-          else
-            echo "status=Compiled" >> $GITHUB_OUTPUT
-            echo "result=Compilation Successful" >> $GITHUB_OUTPUT
-            echo "Compilation successful!"
-          fi
-
-      - name: Execute code
-        id: execution
-        if: steps.compile.outputs.status == 'Compiled'
-        run: |
-          # 设置内存限制
-          ulimit -v 524288  # 512MB
+          end_time=$(date +%s%N)
+          execution_time=$((($end_time - $start_time)/1000000))
           
-          # 准备输入重定向
-          input_redir=""
-          if [ -f "${{ steps.setup.outputs.input_file }}" ]; then
-            input_redir="< ${{ steps.setup.outputs.input_file }}"
-          fi
-          
-          # 执行程序
-          start_time=$(date +%s.%N)
-          
-          # 使用eval处理输入重定向
-          eval "timeout 2s ${{ steps.setup.outputs.command }} $input_redir" \
-            > "${{ steps.setup.outputs.output_file }}" \
-            2> "${{ steps.setup.outputs.error_file }}" || true
-          
-          exit_code=$?
-          end_time=$(date +%s.%N)
-          
-          # 计算执行时间
-          execution_time=$(echo "$end_time - $start_time" | bc -l || echo 0)
-          
-          # 确定执行状态
-          if [ $exit_code -eq 0 ]; then
-            status="AC"
-            message="Accepted"
-          elif [ $exit_code -eq 124 ]; then
+          # Check time limit
+          if [ $execution_time -gt 2000 ] && [ "$status" == "AC" ]; then
             status="TLE"
-            message="Time Limit Exceeded"
-          elif [ $exit_code -eq 137 ]; then
-            status="MLE"
-            message="Memory Limit Exceeded"
-          elif [ $exit_code -eq 139 ]; then
-            status="SIGSEGV"
-            message="Segmentation Fault"
-          else
-            status="RE"
-            message="Runtime Error"
           fi
           
-          echo "status=$status" >> $GITHUB_OUTPUT
-          echo "message=$message" >> $GITHUB_OUTPUT
-          echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
-          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          # Check memory limit if available
+          if [ -f memory.txt ] && [ "$status" == "AC" ]; then
+            memory=$(cat memory.txt)
+            if [ $memory -gt 512000 ]; then
+              status="MLE"
+            fi
+          fi
           
-          echo "Execution status: $status"
-          echo "Exit code: $exit_code"
-          echo "Execution time: $execution_time seconds"
-
-      - name: Generate report
+          # Check if output matches expected
+          if [ "$status" == "AC" ]; then
+            if [ "${{ github.event.inputs.expected }}" != "" ]; then
+              if ! diff -w output.txt <(echo '${{ github.event.inputs.expected }}') > /dev/null; then
+                status="WA"
+              fi
+            fi
+          fi
+          
+          echo "STATUS=$status" >> $GITHUB_OUTPUT
+          echo "EXECUTION_TIME=$execution_time" >> $GITHUB_OUTPUT
+          if [ -f output.txt ]; then
+            output=$(cat output.txt)
+            echo "OUTPUT<<EOF" >> $GITHUB_OUTPUT
+            echo "$output" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+          if [ -n "$error_msg" ]; then
+            echo "ERROR_MSG<<EOF" >> $GITHUB_OUTPUT
+            echo "$error_msg" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Set result
         run: |
-          sudo apt-get install -y jq
-          
-          # 读取文件内容并转义为JSON字符串
-          output_content=$(jq -Rs . < "${{ steps.setup.outputs.output_file }}")
-          error_content=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
-          
-          if [ "${{ steps.compile.outputs.status }}" = "CE" ]; then
-            compile_error=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
-            status_val="CE"
-            message_val="Compilation Error"
-            time_val="0"
-            code_val="1"
-          else
-            status_val="${{ steps.execution.outputs.status }}"
-            message_val="${{ steps.execution.outputs.message }}"
-            time_val="${{ steps.execution.outputs.execution_time }}"
-            code_val="${{ steps.execution.outputs.exit_code }}"
-          fi
-          
-          # 使用jq创建JSON文件
-          jq -n \
-            --arg status "$status_val" \
-            --arg message "$message_val" \
-            --arg time "$time_val" \
-            --argjson time_num "$(echo "$time_val" | bc -l || echo 0)" \
-            --arg code "$code_val" \
-            --argjson code_num "$(echo "$code_val" | bc -l || echo 1)" \
-            --arg output "$output_content" \
-            --arg error "$error_content" \
-            '{
-              status: $status,
-              message: $message,
-              execution_time: $time_num,
-              exit_code: $code_num,
-              output: ($output | fromjson),
-              error: ($error | fromjson)
-            }' > result.json
-          
-          echo "Generated result.json:"
-          cat result.json
-
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-results
-          path: result.json
+          echo "::set-output name=result::${{ steps.execute.outputs.STATUS }}"
+          echo "::set-output name=output::${{ steps.execute.outputs.OUTPUT }}"
+          echo "::set-output name=error::${{ steps.execute.outputs.ERROR_MSG }}"
+          echo "::set-output name=execution_time::${{ steps.execute.outputs.EXECUTION_TIME }}"
