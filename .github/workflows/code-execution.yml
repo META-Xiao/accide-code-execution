@@ -50,9 +50,7 @@ jobs:
       - name: Create files
         run: |
           # 创建源代码文件
-          cat > "${{ steps.setup.outputs.filename }}" << 'EOL'
-${{ github.event.inputs.code }}
-EOL
+          echo '${{ github.event.inputs.code }}' > "${{ steps.setup.outputs.filename }}"
           
           # 创建输入文件（如果有输入）
           if [ -n "${{ github.event.inputs.input }}" ]; then
