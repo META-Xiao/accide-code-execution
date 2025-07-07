@@ -34,7 +34,7 @@ jobs:
     steps:
       # 步骤1: 检出仓库代码 (虽然我们不直接用仓库里的代码，但这是个好习惯)
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # 步骤2: 根据语言，将接收到的代码和输入写入文件
       - name: Prepare execution files
@@ -99,7 +99,7 @@ jobs:
 
       # 步骤5: 上传包含所有结果的文件夹作为 artifact
       - name: Upload judgment result
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: judge-result
           path: ./results/
