@@ -1,0 +1,182 @@
+name: Code Execution Workflow
+
+# This workflow is triggered manually or via API
+on:
+  workflow_dispatch:
+    inputs:
+      filename:
+        description: 'Name of the file to execute'
+        required: true
+      language:
+        description: 'Programming language (cpp, python, java, nodejs)'
+        required: true
+      code:
+        description: 'Source code to execute'
+        required: true
+      input:
+        description: 'Input for the program'
+        required: false
+        default: ''
+
+jobs:
+  execute-code:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # Checkout repository for any reference files that might be needed
+      - name: Checkout repository
+        uses: actions/checkout@v2
+      
+      # Set up variables
+      - name: Set execution variables
+        id: vars
+        run: |
+          echo "filename=${{ github.event.inputs.filename }}" >> $GITHUB_OUTPUT
+          echo "language=${{ github.event.inputs.language }}" >> $GITHUB_OUTPUT
+          echo "input_file=input.txt" >> $GITHUB_OUTPUT
+          echo "output_file=output.txt" >> $GITHUB_OUTPUT
+          echo "error_file=error.txt" >> $GITHUB_OUTPUT
+          echo "time_limit=2" >> $GITHUB_OUTPUT
+          echo "memory_limit=512" >> $GITHUB_OUTPUT
+      
+      # Create source code file
+      - name: Create source code file
+        run: |
+          echo '${{ github.event.inputs.code }}' > ${{ steps.vars.outputs.filename }}
+          
+      # Create input file if needed
+      - name: Create input file
+        if: ${{ github.event.inputs.input != '' }}
+        run: |
+          echo '${{ github.event.inputs.input }}' > ${{ steps.vars.outputs.input_file }}
+      
+      # Install required dependencies based on language
+      - name: Install dependencies
+        run: |
+          if [ "${{ steps.vars.outputs.language }}" == "cpp" ]; then
+            sudo apt-get update
+            sudo apt-get install -y g++
+          elif [ "${{ steps.vars.outputs.language }}" == "java" ]; then
+            sudo apt-get update
+            sudo apt-get install -y openjdk-17-jdk
+          elif [ "${{ steps.vars.outputs.language }}" == "python" ]; then
+            sudo apt-get update
+            sudo apt-get install -y python3 python3-pip
+          elif [ "${{ steps.vars.outputs.language }}" == "nodejs" ]; then
+            sudo apt-get update
+            sudo apt-get install -y nodejs npm
+          fi
+      
+      # Set up file extensions and compilation/execution commands based on language
+      - name: Setup execution environment
+        id: setup
+        run: |
+          if [ "${{ steps.vars.outputs.language }}" == "cpp" ]; then
+            echo "compile=g++ ${{ steps.vars.outputs.filename }} -o program" >> $GITHUB_OUTPUT
+            echo "execute=./program" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.vars.outputs.language }}" == "java" ]; then
+            CLASSNAME=$(basename ${{ steps.vars.outputs.filename }} .java)
+            echo "compile=javac ${{ steps.vars.outputs.filename }}" >> $GITHUB_OUTPUT
+            echo "execute=java -Xmx${{ steps.vars.outputs.memory_limit }}m ${CLASSNAME}" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.vars.outputs.language }}" == "python" ]; then
+            echo "compile=echo 'No compilation needed for Python'" >> $GITHUB_OUTPUT
+            echo "execute=python3 ${{ steps.vars.outputs.filename }}" >> $GITHUB_OUTPUT
+          elif [ "${{ steps.vars.outputs.language }}" == "nodejs" ]; then
+            echo "compile=echo 'No compilation needed for Node.js'" >> $GITHUB_OUTPUT
+            echo "execute=node --max-old-space-size=${{ steps.vars.outputs.memory_limit }} ${{ steps.vars.outputs.filename }}" >> $GITHUB_OUTPUT
+          else
+            echo "::error::Unsupported language: ${{ steps.vars.outputs.language }}"
+            exit 1
+          fi
+      
+      # Compile the code
+      - name: Compile code
+        id: compile
+        continue-on-error: true
+        run: |
+          ${{ steps.setup.outputs.compile }} 2> ${{ steps.vars.outputs.error_file }}
+          if [ $? -ne 0 ]; then
+            echo "status=CE" >> $GITHUB_OUTPUT
+            echo "message=Compilation Error" >> $GITHUB_OUTPUT
+            cat ${{ steps.vars.outputs.error_file }}
+          else
+            echo "status=Compiled" >> $GITHUB_OUTPUT
+            echo "message=Compilation Successful" >> $GITHUB_OUTPUT
+          fi
+      
+      # Execute the code if compilation was successful
+      - name: Execute code
+        id: execute
+        if: steps.compile.outputs.status != 'CE'
+        continue-on-error: true
+        timeout-minutes: ${{ steps.vars.outputs.time_limit }}
+        run: |
+          # Install memory tracking tool
+          sudo apt-get install -y time
+          
+          start_time=$(date +%s.%N)
+          
+          if [ -f "${{ steps.vars.outputs.input_file }}" ]; then
+            /usr/bin/time -f "%M" -o memory.txt timeout ${{ steps.vars.outputs.time_limit }}s ${{ steps.setup.outputs.execute }} < ${{ steps.vars.outputs.input_file }} > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }}
+          else
+            /usr/bin/time -f "%M" -o memory.txt timeout ${{ steps.vars.outputs.time_limit }}s ${{ steps.setup.outputs.execute }} > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }}
+          fi
+          
+          exit_code=$?
+          end_time=$(date +%s.%N)
+          execution_time=$(echo "$end_time - $start_time" | bc)
+          memory_usage=$(cat memory.txt)
+          
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
+          echo "memory_usage=$memory_usage" >> $GITHUB_OUTPUT
+          
+          # Convert memory limit from MB to KB for comparison
+          memory_limit_kb=$(( ${{ steps.vars.outputs.memory_limit }} * 1024 ))
+          
+          if [ $exit_code -eq 0 ]; then
+            echo "status=AC" >> $GITHUB_OUTPUT
+            echo "message=Accepted" >> $GITHUB_OUTPUT
+          elif [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ] || [ $exit_code -eq 143 ]; then
+            echo "status=TLE" >> $GITHUB_OUTPUT
+            echo "message=Time Limit Exceeded" >> $GITHUB_OUTPUT
+          elif [ $exit_code -eq 139 ]; then
+            echo "status=SIGSEGV" >> $GITHUB_OUTPUT
+            echo "message=Runtime Error (SIGSEGV)" >> $GITHUB_OUTPUT
+          elif [ $memory_usage -gt $memory_limit_kb ]; then
+            echo "status=MLE" >> $GITHUB_OUTPUT
+            echo "message=Memory Limit Exceeded" >> $GITHUB_OUTPUT
+          else
+            echo "status=RE" >> $GITHUB_OUTPUT
+            echo "message=Runtime Error" >> $GITHUB_OUTPUT
+          fi
+      
+      # Create result JSON file
+      - name: Create result file
+        run: |
+          sudo apt-get install -y jq
+          
+          if [ "${{ steps.compile.outputs.status }}" == "CE" ]; then
+            status="CE"
+            message="Compilation Error"
+            error_content=$(cat ${{ steps.vars.outputs.error_file }})
+            jq -n --arg status "$status" --arg message "$message" --arg error "$error_content" '{status: $status, message: $message, compile_error: $error, output: "", execution_time: 0, memory_usage: 0, exit_code: 0}' > result.json
+          else
+            status="${{ steps.execute.outputs.status }}"
+            message="${{ steps.execute.outputs.message }}"
+            output_content=$(cat ${{ steps.vars.outputs.output_file }})
+            error_content=$(cat ${{ steps.vars.outputs.error_file }})
+            execution_time="${{ steps.execute.outputs.execution_time }}"
+            memory_usage="${{ steps.execute.outputs.memory_usage }}"
+            exit_code="${{ steps.execute.outputs.exit_code }}"
+            
+            jq -n --arg status "$status" --arg message "$message" --arg output "$output_content" --arg error "$error_content" --arg time "$execution_time" --arg memory "$memory_usage" --arg exit "$exit_code" '{status: $status, message: $message, compile_error: "", output: $output, error: $error, execution_time: $time, memory_usage: $memory, exit_code: $exit}' > result.json
+          fi
+      
+      # Upload result as an artifact
+      - name: Upload execution result
+        uses: actions/upload-artifact@v2
+        with:
+          name: execution-results
+          path: result.json
+          retention-days: 1
