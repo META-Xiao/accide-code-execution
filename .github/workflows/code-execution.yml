@@ -48,16 +48,16 @@ jobs:
         run: |
           # 解码源代码
           if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            echo "${{ github.event.inputs.code_base64 }}" | base64 --decode > solution.cpp
+            echo '${{ github.event.inputs.code_base64 }}' | base64 --decode --ignore-garbage > solution.cpp
           elif [ "${{ github.event.inputs.language }}" == "java" ]; then
-            echo "${{ github.event.inputs.code_base64 }}" | base64 --decode > Main.java
+            echo '${{ github.event.inputs.code_base64 }}' | base64 --decode --ignore-garbage > Main.java
           elif [ "${{ github.event.inputs.language }}" == "python" ]; then
-            echo "${{ github.event.inputs.code_base64 }}" | base64 --decode > solution.py
+            echo '${{ github.event.inputs.code_base64 }}' | base64 --decode --ignore-garbage > solution.py
           fi
           
           # 解码输入数据
           if [ -n "${{ github.event.inputs.input_base64 }}" ]; then
-            echo "${{ github.event.inputs.input_base64 }}" | base64 --decode > input.txt
+            echo '${{ github.event.inputs.input_base64 }}' | base64 --decode --ignore-garbage > input.txt
           else
             touch input.txt
           fi
