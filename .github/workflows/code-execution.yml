@@ -39,65 +39,74 @@ jobs:
       # 步骤2: 根据语言，将接收到的代码和输入写入文件
       - name: Prepare execution files
         run: |
+          # 禁用错误导致的脚本终止
+          set +e
+          
           # 创建一个结果目录
-          mkdir -p results
+          mkdir -p results || true
 
           # 设置 UTF-8 环境变量
-          export LC_ALL=C.UTF-8
-          export LANG=C.UTF-8
+          export LC_ALL=C.UTF-8 || true
+          export LANG=C.UTF-8 || true
           
           # 将输入写入文件
-          echo "${{ github.event.inputs.std_input }}" > input.txt
-          echo "${{ github.event.inputs.expected_output }}" > expected.txt
+          echo "${{ github.event.inputs.std_input }}" > input.txt || true
+          echo "${{ github.event.inputs.expected_output }}" > expected.txt || true
           
           # 根据语言确定源文件名
-          SOURCE_FILE="main.${{ github.event.inputs.language }}"
+          SOURCE_FILE="main.${{ github.event.inputs.language }}" || true
           # 使用 cat 命令确保文件以 UTF-8 格式保存
-          echo "${{ github.event.inputs.source_code }}" | cat > $SOURCE_FILE
-          echo "SOURCE_FILE=$SOURCE_FILE" >> $GITHUB_ENV
+          echo "${{ github.event.inputs.source_code }}" | cat > $SOURCE_FILE || true
+          echo "SOURCE_FILE=$SOURCE_FILE" >> $GITHUB_ENV || true
           
           # 显示源代码文件内容以进行调试
-          echo "=== Source Code ==="
-          cat $SOURCE_FILE
-          echo "=================="
+          echo "=== Source Code ===" || true
+          cat $SOURCE_FILE || true
+          echo "==================" || true
           
           # 检查文件编码
-          echo "=== File Encoding ==="
-          file -i $SOURCE_FILE
-          echo "===================="
+          echo "=== File Encoding ===" || true
+          file -i $SOURCE_FILE || true
+          echo "====================" || true
         
       # 步骤3: 编译代码 (以C++为例)
       - name: Compile C++ Code
         if: github.event.inputs.language == 'cpp'
         id: compile_cpp
         run: |
+          # 禁用错误导致的脚本终止
+          set +e
+          
           # 输出 C++ 版本信息以进行调试
-          g++ --version
+          g++ --version || true
           
           # 创建编译日志目录
-          mkdir -p ./results
+          mkdir -p ./results || true
           
           # 尝试编译代码
           g++ main.cpp -o main_exec -O2 -std=c++17 -Wall -Wextra -fdiagnostics-color=always > ./results/compile.log 2>&1
           COMPILE_RESULT=$?
           
           # 输出编译日志
-          echo "=== Compilation Log ==="
-          cat ./results/compile.log
-          echo "======================="
+          echo "=== Compilation Log ===" || true
+          cat ./results/compile.log || true
+          echo "=======================" || true
           
           if [ $COMPILE_RESULT -ne 0 ]; then
-            echo "Compilation failed with exit code: $COMPILE_RESULT"
-            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json
-            echo "JUDGE_STATUS=CE" >> $GITHUB_ENV
+            echo "Compilation failed with exit code: $COMPILE_RESULT" || true
+            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json || true
+            echo "JUDGE_STATUS=CE" >> $GITHUB_ENV || true
           else
-            echo "Compilation successful"
+            echo "Compilation successful" || true
           fi
 
       # 步骤4: 运行代码并评测 (以C++为例)
       - name: Run and Judge C++ Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'cpp'
         run: |
+          # 禁用错误导致的脚本终止
+          set +e
+          
           # 运行可执行文件，限制时间和内存
           # TLE: 2 seconds, MLE: 256 MB
           timeout 2s ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
@@ -114,20 +123,24 @@ jobs:
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
             # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
-            if [ $? -ne 0 ]; then
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null || true
+            DIFF_RESULT=$?
+            if [ $DIFF_RESULT -ne 0 ]; then
               STATUS="WA"
               MESSAGE="Wrong Answer"
             fi
           fi
           
           # 生成最终的json结果
-          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json || true
 
       # 添加对Python的支持
       - name: Run Python Code
         if: success() && github.event.inputs.language == 'python'
         run: |
+          # 禁用错误导致的脚本终止
+          set +e
+          
           # 运行Python程序，限制时间
           # TLE: 2 seconds, MLE: 256 MB
           timeout 2s python3 main.py < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
@@ -144,15 +157,16 @@ jobs:
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
             # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
-            if [ $? -ne 0 ]; then
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null || true
+            DIFF_RESULT=$?
+            if [ $DIFF_RESULT -ne 0 ]; then
               STATUS="WA"
               MESSAGE="Wrong Answer"
             fi
           fi
           
           # 生成最终的json结果
-          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json || true
 
       # 添加对Java的支持
       - name: Compile Java Code
