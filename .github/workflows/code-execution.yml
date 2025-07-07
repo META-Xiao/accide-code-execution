@@ -1,6 +1,5 @@
 name: Code Execution Workflow
 
-# This workflow is triggered manually or via API
 on:
   workflow_dispatch:
     inputs:
@@ -23,11 +22,9 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # Checkout repository for any reference files that might be needed
       - name: Checkout repository
         uses: actions/checkout@v4
       
-      # Set up variables
       - name: Set execution variables
         id: vars
         run: |
@@ -36,21 +33,16 @@ jobs:
           echo "input_file=input.txt" >> $GITHUB_OUTPUT
           echo "output_file=output.txt" >> $GITHUB_OUTPUT
           echo "error_file=error.txt" >> $GITHUB_OUTPUT
-          echo "time_limit=2" >> $GITHUB_OUTPUT
-          echo "memory_limit=512" >> $GITHUB_OUTPUT
       
-      # Create source code file
       - name: Create source code file
         run: |
           echo '${{ github.event.inputs.code }}' > ${{ steps.vars.outputs.filename }}
           
-      # Create input file if needed
-      - name: Create input file
+      - name: Create input file if needed
         if: ${{ github.event.inputs.input != '' }}
         run: |
           echo '${{ github.event.inputs.input }}' > ${{ steps.vars.outputs.input_file }}
       
-      # Install required dependencies based on language
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -64,34 +56,12 @@ jobs:
             sudo apt-get install -y nodejs npm time bc
           fi
       
-      # Set up file extensions and compilation/execution commands based on language
-      - name: Setup execution environment
-        id: setup
-        run: |
-          if [ "${{ steps.vars.outputs.language }}" == "cpp" ]; then
-            echo "compile=g++ ${{ steps.vars.outputs.filename }} -o program -O2" >> $GITHUB_OUTPUT
-            echo "execute=./program" >> $GITHUB_OUTPUT
-          elif [ "${{ steps.vars.outputs.language }}" == "java" ]; then
-            CLASSNAME=$(basename ${{ steps.vars.outputs.filename }} .java)
-            echo "compile=javac ${{ steps.vars.outputs.filename }}" >> $GITHUB_OUTPUT
-            echo "execute=java -Xmx${{ steps.vars.outputs.memory_limit }}m -Xss8m ${CLASSNAME}" >> $GITHUB_OUTPUT
-          elif [ "${{ steps.vars.outputs.language }}" == "python" ]; then
-            echo "compile=echo 'No compilation needed for Python'" >> $GITHUB_OUTPUT
-            echo "execute=python3 ${{ steps.vars.outputs.filename }}" >> $GITHUB_OUTPUT
-          elif [ "${{ steps.vars.outputs.language }}" == "nodejs" ]; then
-            echo "compile=echo 'No compilation needed for Node.js'" >> $GITHUB_OUTPUT
-            echo "execute=node --max-old-space-size=${{ steps.vars.outputs.memory_limit }} ${{ steps.vars.outputs.filename }}" >> $GITHUB_OUTPUT
-          else
-            echo "::error::Unsupported language: ${{ steps.vars.outputs.language }}"
-            exit 1
-          fi
-      
-      # Compile the code
-      - name: Compile code
-        id: compile
+      - name: Compile code (C++)
+        id: compile_cpp
+        if: steps.vars.outputs.language == 'cpp'
         continue-on-error: true
         run: |
-          ${{ steps.setup.outputs.compile }} 2> ${{ steps.vars.outputs.error_file }}
+          g++ ${{ steps.vars.outputs.filename }} -o program -O2 2> ${{ steps.vars.outputs.error_file }}
           if [ $? -ne 0 ]; then
             echo "status=CE" >> $GITHUB_OUTPUT
             echo "message=Compilation Error" >> $GITHUB_OUTPUT
@@ -101,33 +71,41 @@ jobs:
             echo "message=Compilation Successful" >> $GITHUB_OUTPUT
           fi
       
-      # Execute the code if compilation was successful
-      - name: Execute code
-        id: execute
-        if: steps.compile.outputs.status != 'CE'
+      - name: Compile code (Java)
+        id: compile_java
+        if: steps.vars.outputs.language == 'java'
         continue-on-error: true
-        # 将timeout-minutes作为字符串处理，而不是直接使用数值
-        timeout-minutes: "${{ steps.vars.outputs.time_limit }}"
         run: |
-          # 确保ulimit设置适当的限制
-          ulimit -s unlimited
-          ulimit -v $(( ${{ steps.vars.outputs.memory_limit }} * 1024 ))
+          javac ${{ steps.vars.outputs.filename }} 2> ${{ steps.vars.outputs.error_file }}
+          if [ $? -ne 0 ]; then
+            echo "status=CE" >> $GITHUB_OUTPUT
+            echo "message=Compilation Error" >> $GITHUB_OUTPUT
+            cat ${{ steps.vars.outputs.error_file }}
+          else
+            echo "status=Compiled" >> $GITHUB_OUTPUT
+            echo "message=Compilation Successful" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Execute code (C++)
+        id: execute_cpp
+        if: steps.vars.outputs.language == 'cpp' && steps.compile_cpp.outputs.status == 'Compiled'
+        continue-on-error: true
+        run: |
+          # Set memory limit
+          ulimit -v 524288
           
           start_time=$(date +%s.%N)
           
           if [ -f "${{ steps.vars.outputs.input_file }}" ]; then
-            /usr/bin/time -f "%M" -o memory.txt timeout "${{ steps.vars.outputs.time_limit }}s" ${{ steps.setup.outputs.execute }} < ${{ steps.vars.outputs.input_file }} > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }} || true
+            /usr/bin/time -f "%M" -o memory.txt timeout 2s ./program < ${{ steps.vars.outputs.input_file }} > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }} || true
           else
-            /usr/bin/time -f "%M" -o memory.txt timeout "${{ steps.vars.outputs.time_limit }}s" ${{ steps.setup.outputs.execute }} > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }} || true
+            /usr/bin/time -f "%M" -o memory.txt timeout 2s ./program > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }} || true
           fi
           
           exit_code=$?
           end_time=$(date +%s.%N)
-          
-          # 使用bc进行浮点计算，避免语法错误
           execution_time=$(echo "$end_time - $start_time" | bc)
           
-          # 检查memory.txt是否存在
           if [ -f memory.txt ]; then
             memory_usage=$(cat memory.txt)
           else
@@ -138,9 +116,6 @@ jobs:
           echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
           echo "memory_usage=$memory_usage" >> $GITHUB_OUTPUT
           
-          # 将内存限制从MB转换为KB进行比较
-          memory_limit_kb=$(( ${{ steps.vars.outputs.memory_limit }} * 1024 ))
-          
           if [ $exit_code -eq 0 ]; then
             echo "status=AC" >> $GITHUB_OUTPUT
             echo "message=Accepted" >> $GITHUB_OUTPUT
@@ -150,7 +125,7 @@ jobs:
           elif [ $exit_code -eq 139 ]; then
             echo "status=SIGSEGV" >> $GITHUB_OUTPUT
             echo "message=Runtime Error (SIGSEGV)" >> $GITHUB_OUTPUT
-          elif [ $memory_usage -gt $memory_limit_kb ]; then
+          elif [ $memory_usage -gt 524288 ]; then
             echo "status=MLE" >> $GITHUB_OUTPUT
             echo "message=Memory Limit Exceeded" >> $GITHUB_OUTPUT
           else
@@ -158,41 +133,46 @@ jobs:
             echo "message=Runtime Error" >> $GITHUB_OUTPUT
           fi
       
-      # Create result JSON file
       - name: Create result file
         run: |
           sudo apt-get install -y jq
           
-          if [ "${{ steps.compile.outputs.status }}" == "CE" ]; then
-            status="CE"
-            message="Compilation Error"
-            error_content=$(cat ${{ steps.vars.outputs.error_file }})
-            jq -n --arg status "$status" --arg message "$message" --arg error "$error_content" '{status: $status, message: $message, compile_error: $error, output: "", execution_time: 0, memory_usage: 0, exit_code: 0}' > result.json
-          else
-            status="${{ steps.execute.outputs.status }}"
-            message="${{ steps.execute.outputs.message }}"
-            
-            # 检查文件是否存在
-            if [ -f "${{ steps.vars.outputs.output_file }}" ]; then
-              output_content=$(cat ${{ steps.vars.outputs.output_file }})
-            else
-              output_content=""
-            fi
-            
-            if [ -f "${{ steps.vars.outputs.error_file }}" ]; then
+          if [ "${{ steps.vars.outputs.language }}" == "cpp" ]; then
+            status="${{ steps.compile_cpp.outputs.status }}"
+            if [ "$status" == "CE" ]; then
+              message="Compilation Error"
               error_content=$(cat ${{ steps.vars.outputs.error_file }})
+              echo '{
+                "status": "CE",
+                "message": "Compilation Error",
+                "compile_error": "'"${error_content//$'\n'/\\n}"'",
+                "output": "",
+                "execution_time": 0,
+                "memory_usage": 0,
+                "exit_code": 0
+              }' > result.json
             else
-              error_content=""
+              status="${{ steps.execute_cpp.outputs.status }}"
+              message="${{ steps.execute_cpp.outputs.message }}"
+              output_content=$(cat ${{ steps.vars.outputs.output_file }})
+              error_content=$(cat ${{ steps.vars.outputs.error_file }})
+              execution_time="${{ steps.execute_cpp.outputs.execution_time }}"
+              memory_usage="${{ steps.execute_cpp.outputs.memory_usage }}"
+              exit_code="${{ steps.execute_cpp.outputs.exit_code }}"
+              
+              echo '{
+                "status": "'"$status"'",
+                "message": "'"$message"'",
+                "compile_error": "",
+                "output": "'"${output_content//$'\n'/\\n}"'",
+                "error": "'"${error_content//$'\n'/\\n}"'",
+                "execution_time": '"$execution_time"',
+                "memory_usage": '"$memory_usage"',
+                "exit_code": '"$exit_code"'
+              }' > result.json
             fi
-            
-            execution_time="${{ steps.execute.outputs.execution_time }}"
-            memory_usage="${{ steps.execute.outputs.memory_usage }}"
-            exit_code="${{ steps.execute.outputs.exit_code }}"
-            
-            jq -n --arg status "$status" --arg message "$message" --arg output "$output_content" --arg error "$error_content" --arg time "$execution_time" --arg memory "$memory_usage" --arg exit "$exit_code" '{status: $status, message: $message, compile_error: "", output: $output, error: $error, execution_time: $time, memory_usage: $memory, exit_code: $exit}' > result.json
           fi
       
-      # Upload result as an artifact
       - name: Upload execution result
         uses: actions/upload-artifact@v4
         with:
