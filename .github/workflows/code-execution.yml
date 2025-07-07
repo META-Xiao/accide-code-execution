@@ -1,168 +1,106 @@
-name: 代码执行
+name: ACC-IDE Code Judge
 
+# 允许通过API调用来触发此工作流
 on:
   workflow_dispatch:
     inputs:
-      language:
-        description: '编程语言'
+      # 从App接收要评测的代码
+      source_code:
+        description: 'The source code to be judged'
         required: true
-        type: choice
-        options:
-          - cpp
-          - java
-          - python
-      code_base64:
-        description: '源代码 (请使用BASE64编码)'
-        required: true
-      input_base64:
-        description: '输入数据 (请使用BASE64编码)'
+      # 从App接收标准输入
+      std_input:
+        description: 'Standard input for the code'
         required: false
         default: ''
+      # 从App接收预期输出
+      expected_output:
+        description: 'Expected output for comparison'
+        required: false
+        default: ''
+      # App传来的语言类型，用于选择编译器
+      language:
+        description: 'The programming language (cpp, python, java)'
+        required: true
+        default: 'cpp'
 
 jobs:
-  execute:
+  build-and-run:
     runs-on: ubuntu-latest
     
+    # 限制job总运行时长，防止无限循环等意外情况
+    timeout-minutes: 1 
+
     steps:
-      - name: 配置环境
+      # 步骤1: 检出仓库代码 (虽然我们不直接用仓库里的代码，但这是个好习惯)
+      - name: Checkout repository
         uses: actions/checkout@v3
-      
-      - name: 设置C++
-        if: ${{ github.event.inputs.language == 'cpp' }}
-        run: sudo apt-get update && sudo apt-get install -y g++
-      
-      - name: 设置Java
-        if: ${{ github.event.inputs.language == 'java' }}
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-      
-      - name: 设置Python
-        if: ${{ github.event.inputs.language == 'python' }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-      
-      - name: 准备代码文件 (从BASE64解码)
+
+      # 步骤2: 根据语言，将接收到的代码和输入写入文件
+      - name: Prepare execution files
         run: |
-          # 解码源代码
-          if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            echo '${{ github.event.inputs.code_base64 }}' | base64 --decode --ignore-garbage > solution.cpp
-          elif [ "${{ github.event.inputs.language }}" == "java" ]; then
-            echo '${{ github.event.inputs.code_base64 }}' | base64 --decode --ignore-garbage > Main.java
-          elif [ "${{ github.event.inputs.language }}" == "python" ]; then
-            echo '${{ github.event.inputs.code_base64 }}' | base64 --decode --ignore-garbage > solution.py
-          fi
+          # 创建一个结果目录
+          mkdir -p results
+
+          # 将输入写入文件
+          echo "${{ github.event.inputs.std_input }}" > input.txt
+          echo "${{ github.event.inputs.expected_output }}" > expected.txt
           
-          # 解码输入数据
-          if [ -n "${{ github.event.inputs.input_base64 }}" ]; then
-            echo '${{ github.event.inputs.input_base64 }}' | base64 --decode --ignore-garbage > input.txt
+          # 根据语言确定源文件名
+          SOURCE_FILE="main.${{ github.event.inputs.language }}"
+          echo "${{ github.event.inputs.source_code }}" > $SOURCE_FILE
+          echo "SOURCE_FILE=$SOURCE_FILE" >> $GITHUB_ENV
+        
+      # 步骤3: 编译代码 (以C++为例)
+      - name: Compile C++ Code
+        if: github.event.inputs.language == 'cpp'
+        id: compile_cpp
+        run: |
+          g++ main.cpp -o main_exec -O2 -std=c++17 &> ./results/compile.log
+          if [ $? -ne 0 ]; then
+            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json
+            echo "JUDGE_STATUS=CE" >> $GITHUB_ENV
+          fi
+
+      # 步骤4: 运行代码并评测 (以C++为例)
+      - name: Run and Judge C++ Code
+        if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'cpp'
+        run: |
+          # 运行可执行文件，限制时间和内存
+          # TLE: 2 seconds, MLE: 256 MB
+          timeout 2s bash -c "ulimit -v 262144; ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log"
+          EXIT_CODE=$?
+          
+          STATUS="AC" # 默认为AC
+          MESSAGE="Accepted"
+
+          if [ $EXIT_CODE -eq 124 ]; then
+            STATUS="TLE"
+            MESSAGE="Time Limit Exceeded"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            STATUS="RE"
+            MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
-            touch input.txt
+            # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
+            if [ $? -ne 0 ]; then
+              STATUS="WA"
+              MESSAGE="Wrong Answer"
+            fi
           fi
           
-          # 调试信息: 检查解码后的文件
-          echo "========= 解码后的源代码 ========="
-          cat solution.cpp || cat Main.java || cat solution.py
-          echo "==============================="
-      
-      - name: 编译与执行C++
-        if: ${{ github.event.inputs.language == 'cpp' }}
-        run: |
-          # 编译
-          g++ -std=c++17 solution.cpp -o solution 2> compile_error.txt
-          if [ $? -ne 0 ]; then
-            echo "::error file=solution.cpp::编译错误"
-            cat compile_error.txt
-            echo "状态: CE (编译错误)" > result.txt
-            echo "错误详情:" >> result.txt
-            cat compile_error.txt >> result.txt
-            exit 0
-          fi
-          
-          # 执行
-          timeout 2s ./solution < input.txt > output.txt 2> error.txt
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -eq 124 ]; then
-            echo "::warning file=solution.cpp::程序超时"
-            echo "状态: TLE (超时)" > result.txt
-            exit 0
-          elif [ $EXIT_CODE -ne 0 ]; then
-            echo "::error file=solution.cpp::运行时错误"
-            cat error.txt
-            echo "状态: RE (运行时错误)" > result.txt
-            echo "错误详情:" >> result.txt
-            cat error.txt >> result.txt
-            exit 0
-          fi
-          
-          echo "::notice file=solution.cpp::执行成功"
-          echo "状态: AC (通过)" > result.txt
-          echo "输出:" >> result.txt
-          cat output.txt >> result.txt
-      
-      - name: 编译与执行Java
-        if: ${{ github.event.inputs.language == 'java' }}
-        run: |
-          # 编译
-          javac Main.java 2> compile_error.txt
-          if [ $? -ne 0 ]; then
-            echo "::error file=Main.java::编译错误"
-            cat compile_error.txt
-            echo "状态: CE (编译错误)" > result.txt
-            echo "错误详情:" >> result.txt
-            cat compile_error.txt >> result.txt
-            exit 0
-          fi
-          
-          # 执行
-          timeout 2s java Main < input.txt > output.txt 2> error.txt
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -eq 124 ]; then
-            echo "::warning file=Main.java::程序超时"
-            echo "状态: TLE (超时)" > result.txt
-            exit 0
-          elif [ $EXIT_CODE -ne 0 ]; then
-            echo "::error file=Main.java::运行时错误"
-            cat error.txt
-            echo "状态: RE (运行时错误)" > result.txt
-            echo "错误详情:" >> result.txt
-            cat error.txt >> result.txt
-            exit 0
-          fi
-          
-          echo "::notice file=Main.java::执行成功"
-          echo "状态: AC (通过)" > result.txt
-          echo "输出:" >> result.txt
-          cat output.txt >> result.txt
-      
-      - name: 执行Python
-        if: ${{ github.event.inputs.language == 'python' }}
-        run: |
-          # 执行
-          timeout 2s python3 solution.py < input.txt > output.txt 2> error.txt
-          EXIT_CODE=$?
-          if [ $EXIT_CODE -eq 124 ]; then
-            echo "::warning file=solution.py::程序超时"
-            echo "状态: TLE (超时)" > result.txt
-            exit 0
-          elif [ $EXIT_CODE -ne 0 ]; then
-            echo "::error file=solution.py::运行时错误"
-            cat error.txt
-            echo "状态: RE (运行时错误)" > result.txt
-            echo "错误详情:" >> result.txt
-            cat error.txt >> result.txt
-            exit 0
-          fi
-          
-          echo "::notice file=solution.py::执行成功"
-          echo "状态: AC (通过)" > result.txt
-          echo "输出:" >> result.txt
-          cat output.txt >> result.txt
-      
-      - name: 上传结果
-        uses: actions/upload-artifact@v4
+          # 生成最终的json结果
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json
+
+      # TODO: 在此处可以为 Python, Java 等其他语言添加类似的编译和运行步骤
+      # - name: Run Python Code
+      #   if: github.event.inputs.language == 'python'
+      #   ...
+
+      # 步骤5: 上传包含所有结果的文件夹作为 artifact
+      - name: Upload judgment result
+        uses: actions/upload-artifact@v3
         with:
-          name: execution-results
-          path: result.txt
+          name: judge-result
+          path: ./results/
+          if-no-files-found: error # 如果结果文件没找到，就让工作流失败
