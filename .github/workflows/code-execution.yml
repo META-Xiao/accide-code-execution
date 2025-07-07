@@ -66,9 +66,12 @@ jobs:
       - name: Run and Judge C++ Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'cpp'
         run: |
-          # 运行可执行文件，限制时间和内存
+          # 先设置内存限制
+          ulimit -v 262144
+          
+          # 运行可执行文件，限制时间
           # TLE: 2 seconds, MLE: 256 MB
-          timeout 2s bash -c "ulimit -v 262144; ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log"
+          timeout 2s ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log
           EXIT_CODE=$?
           
           STATUS="AC" # 默认为AC
@@ -92,10 +95,83 @@ jobs:
           # 生成最终的json结果
           echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json
 
-      # TODO: 在此处可以为 Python, Java 等其他语言添加类似的编译和运行步骤
-      # - name: Run Python Code
-      #   if: github.event.inputs.language == 'python'
-      #   ...
+      # 添加对Python的支持
+      - name: Run Python Code
+        if: success() && github.event.inputs.language == 'python'
+        run: |
+          # 先设置内存限制
+          ulimit -v 262144
+          
+          # 运行Python程序，限制时间
+          # TLE: 2 seconds, MLE: 256 MB
+          timeout 2s python3 main.py < input.txt > ./results/actual.txt 2> ./results/stderr.log
+          EXIT_CODE=$?
+          
+          STATUS="AC" # 默认为AC
+          MESSAGE="Accepted"
+
+          if [ $EXIT_CODE -eq 124 ]; then
+            STATUS="TLE"
+            MESSAGE="Time Limit Exceeded"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            STATUS="RE"
+            MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
+          else
+            # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
+            if [ $? -ne 0 ]; then
+              STATUS="WA"
+              MESSAGE="Wrong Answer"
+            fi
+          fi
+          
+          # 生成最终的json结果
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json
+
+      # 添加对Java的支持
+      - name: Compile Java Code
+        if: github.event.inputs.language == 'java'
+        id: compile_java
+        run: |
+          # 编译Java程序
+          javac main.java -d . &> ./results/compile.log
+          if [ $? -ne 0 ]; then
+            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json
+            echo "JUDGE_STATUS=CE" >> $GITHUB_ENV
+          fi
+
+      - name: Run Java Code
+        if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'java'
+        run: |
+          # 先设置内存限制
+          ulimit -v 262144
+          
+          # 运行Java程序，限制时间
+          # TLE: 2 seconds, MLE: 256 MB
+          # 假设main.java中的类名为Main
+          timeout 2s java Main < input.txt > ./results/actual.txt 2> ./results/stderr.log
+          EXIT_CODE=$?
+          
+          STATUS="AC" # 默认为AC
+          MESSAGE="Accepted"
+
+          if [ $EXIT_CODE -eq 124 ]; then
+            STATUS="TLE"
+            MESSAGE="Time Limit Exceeded"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            STATUS="RE"
+            MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
+          else
+            # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
+            if [ $? -ne 0 ]; then
+              STATUS="WA"
+              MESSAGE="Wrong Answer"
+            fi
+          fi
+          
+          # 生成最终的json结果
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json
 
       # 步骤5: 上传包含所有结果的文件夹作为 artifact
       - name: Upload judgment result
