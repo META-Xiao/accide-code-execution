@@ -1,181 +1,175 @@
-name: Code Execution Workflow
+name: Code Execution Tester
 
 on:
   workflow_dispatch:
     inputs:
       filename:
-        description: 'Name of the file to execute'
-        required: true
-      language:
-        description: 'Programming language (cpp, python, java, nodejs)'
+        description: 'Filename with extension (e.g., main.cpp)'
         required: true
       code:
         description: 'Source code to execute'
         required: true
       input:
-        description: 'Input for the program'
+        description: 'Input for the program (optional)'
         required: false
         default: ''
 
 jobs:
   execute-code:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-      
-      - name: Set execution variables
-        id: vars
+      - name: Setup environment
+        id: setup
         run: |
-          echo "filename=${{ github.event.inputs.filename }}" >> $GITHUB_OUTPUT
-          echo "language=${{ github.event.inputs.language }}" >> $GITHUB_OUTPUT
+          filename="${{ github.event.inputs.filename }}"
+          extension="${filename##*.}"
+          
+          case $extension in
+            cpp)   lang="cpp";  command="./program" ;;
+            java)  lang="java"; command="java Main" ;;
+            py)    lang="py";   command="python3 $filename" ;;
+            js)    lang="js";   command="node $filename" ;;
+            *)     echo "Unsupported file type"; exit 1 ;;
+          esac
+
+          echo "filename=$filename" >> $GITHUB_OUTPUT
+          echo "lang=$lang" >> $GITHUB_OUTPUT
+          echo "command=$command" >> $GITHUB_OUTPUT
           echo "input_file=input.txt" >> $GITHUB_OUTPUT
           echo "output_file=output.txt" >> $GITHUB_OUTPUT
           echo "error_file=error.txt" >> $GITHUB_OUTPUT
-      
-      - name: Create source code file
+          echo "time_mem=time_mem.txt" >> $GITHUB_OUTPUT
+
+      - name: Create files
         run: |
-          echo '${{ github.event.inputs.code }}' > ${{ steps.vars.outputs.filename }}
-          
-      - name: Create input file if needed
-        if: ${{ github.event.inputs.input != '' }}
-        run: |
-          echo '${{ github.event.inputs.input }}' > ${{ steps.vars.outputs.input_file }}
-      
+          echo '${{ github.event.inputs.code }}' > ${{ steps.setup.outputs.filename }}
+          if [ -n "${{ github.event.inputs.input }}" ]; then
+            echo '${{ github.event.inputs.input }}' > ${{ steps.setup.outputs.input_file }}
+          fi
+
       - name: Install dependencies
         run: |
           sudo apt-get update
-          if [ "${{ steps.vars.outputs.language }}" == "cpp" ]; then
-            sudo apt-get install -y g++ time bc
-          elif [ "${{ steps.vars.outputs.language }}" == "java" ]; then
-            sudo apt-get install -y openjdk-17-jdk time bc
-          elif [ "${{ steps.vars.outputs.language }}" == "python" ]; then
-            sudo apt-get install -y python3 python3-pip time bc
-          elif [ "${{ steps.vars.outputs.language }}" == "nodejs" ]; then
-            sudo apt-get install -y nodejs npm time bc
-          fi
-      
-      - name: Compile code (C++)
-        id: compile_cpp
-        if: steps.vars.outputs.language == 'cpp'
-        continue-on-error: true
+          case "${{ steps.setup.outputs.lang }}" in
+            cpp)  sudo apt-get install -y g++ ;;
+            java) sudo apt-get install -y openjdk-17-jdk ;;
+            py)   sudo apt-get install -y python3 ;;
+            js)   sudo apt-get install -y nodejs ;;
+          esac
+          sudo apt-get install -y time bc
+
+      - name: Compile code
+        if: contains('cpp java', steps.setup.outputs.lang)
         run: |
-          g++ ${{ steps.vars.outputs.filename }} -o program -O2 2> ${{ steps.vars.outputs.error_file }}
-          if [ $? -ne 0 ]; then
-            echo "status=CE" >> $GITHUB_OUTPUT
-            echo "message=Compilation Error" >> $GITHUB_OUTPUT
-            cat ${{ steps.vars.outputs.error_file }}
-          else
-            echo "status=Compiled" >> $GITHUB_OUTPUT
-            echo "message=Compilation Successful" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Compile code (Java)
-        id: compile_java
-        if: steps.vars.outputs.language == 'java'
-        continue-on-error: true
+          case "${{ steps.setup.outputs.lang }}" in
+            cpp)
+              g++ ${{ steps.setup.outputs.filename }} -o program -O2 2> ${{ steps.setup.outputs.error_file }} || {
+                echo "status=CE" >> $GITHUB_OUTPUT
+                echo "message=Compilation Error" >> $GITHUB_OUTPUT
+                exit 0
+              }
+              ;;
+            java)
+              javac ${{ steps.setup.outputs.filename }} 2> ${{ steps.setup.outputs.error_file }} || {
+                echo "status=CE" >> $GITHUB_OUTPUT
+                echo "message=Compilation Error" >> $GITHUB_OUTPUT
+                exit 0
+              }
+              ;;
+          esac
+          echo "status=Compiled" >> $GITHUB_OUTPUT
+
+      - name: Execute code
+        id: execution
+        if: steps.compile.outputs.status != 'CE'
         run: |
-          javac ${{ steps.vars.outputs.filename }} 2> ${{ steps.vars.outputs.error_file }}
-          if [ $? -ne 0 ]; then
-            echo "status=CE" >> $GITHUB_OUTPUT
-            echo "message=Compilation Error" >> $GITHUB_OUTPUT
-            cat ${{ steps.vars.outputs.error_file }}
-          else
-            echo "status=Compiled" >> $GITHUB_OUTPUT
-            echo "message=Compilation Successful" >> $GITHUB_OUTPUT
-          fi
-      
-      - name: Execute code (C++)
-        id: execute_cpp
-        if: steps.vars.outputs.language == 'cpp' && steps.compile_cpp.outputs.status == 'Compiled'
-        continue-on-error: true
-        run: |
-          # Set memory limit
-          ulimit -v 524288
-          
-          start_time=$(date +%s.%N)
-          
-          if [ -f "${{ steps.vars.outputs.input_file }}" ]; then
-            /usr/bin/time -f "%M" -o memory.txt timeout 2s ./program < ${{ steps.vars.outputs.input_file }} > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }} || true
-          else
-            /usr/bin/time -f "%M" -o memory.txt timeout 2s ./program > ${{ steps.vars.outputs.output_file }} 2> ${{ steps.vars.outputs.error_file }} || true
-          fi
-          
+          # Set resource limits
+          ulimit -v 524288  # 512MB memory limit
+
+          # Prepare input
+          [ -f "${{ steps.setup.outputs.input_file }}" ] && input_redir="< ${{ steps.setup.outputs.input_file }}" || input_redir=""
+
+          # Execute with measurements
+          start=$(date +%s.%N)
+          /usr/bin/time -f "%e %M" -o ${{ steps.setup.outputs.time_mem }} timeout 2s \
+            sh -c "${{ steps.setup.outputs.command }} $input_redir" \
+            > ${{ steps.setup.outputs.output_file }} \
+            2> ${{ steps.setup.outputs.error_file }} || true
           exit_code=$?
-          end_time=$(date +%s.%N)
-          execution_time=$(echo "$end_time - $start_time" | bc)
+          end=$(date +%s.%N)
           
-          if [ -f memory.txt ]; then
-            memory_usage=$(cat memory.txt)
+          # Calculate execution time
+          runtime=$(echo "$end - $start" | bc -l)
+          [ -z "$runtime" ] && runtime=0
+
+          # Get memory usage
+          if [ -f "${{ steps.setup.outputs.time_mem }}" ]; then
+            mem_usage=$(awk '{print $2}' ${{ steps.setup.outputs.time_mem }})
           else
-            memory_usage=0
+            mem_usage=0
           fi
-          
-          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
-          echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
-          echo "memory_usage=$memory_usage" >> $GITHUB_OUTPUT
-          
+
+          # Determine result status
           if [ $exit_code -eq 0 ]; then
-            echo "status=AC" >> $GITHUB_OUTPUT
-            echo "message=Accepted" >> $GITHUB_OUTPUT
-          elif [ $exit_code -eq 124 ] || [ $exit_code -eq 137 ] || [ $exit_code -eq 143 ]; then
-            echo "status=TLE" >> $GITHUB_OUTPUT
-            echo "message=Time Limit Exceeded" >> $GITHUB_OUTPUT
+            status="AC"
+            message="Execution Successful"
+          elif [ $exit_code -eq 124 ]; then
+            status="TLE"
+            message="Time Limit Exceeded"
+          elif [ $mem_usage -gt 524288 ]; then
+            status="MLE"
+            message="Memory Limit Exceeded"
           elif [ $exit_code -eq 139 ]; then
-            echo "status=SIGSEGV" >> $GITHUB_OUTPUT
-            echo "message=Runtime Error (SIGSEGV)" >> $GITHUB_OUTPUT
-          elif [ $memory_usage -gt 524288 ]; then
-            echo "status=MLE" >> $GITHUB_OUTPUT
-            echo "message=Memory Limit Exceeded" >> $GITHUB_OUTPUT
+            status="SIGSEGV"
+            message="Segmentation Fault"
           else
-            echo "status=RE" >> $GITHUB_OUTPUT
-            echo "message=Runtime Error" >> $GITHUB_OUTPUT
+            status="RE"
+            message="Runtime Error"
           fi
-      
-      - name: Create result file
+
+          echo "status=$status" >> $GITHUB_OUTPUT
+          echo "message=$message" >> $GITHUB_OUTPUT
+          echo "execution_time=$runtime" >> $GITHUB_OUTPUT
+          echo "memory_usage=$mem_usage" >> $GITHUB_OUTPUT
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+
+      - name: Generate report
         run: |
-          sudo apt-get install -y jq
+          # Prepare data
+          output=$(cat ${{ steps.setup.outputs.output_file }} | jq -Rsa .)
+          error=$(cat ${{ steps.setup.outputs.error_file }} | jq -Rsa .)
           
-          if [ "${{ steps.vars.outputs.language }}" == "cpp" ]; then
-            status="${{ steps.compile_cpp.outputs.status }}"
-            if [ "$status" == "CE" ]; then
-              message="Compilation Error"
-              error_content=$(cat ${{ steps.vars.outputs.error_file }})
-              echo '{
-                "status": "CE",
-                "message": "Compilation Error",
-                "compile_error": "'"${error_content//$'\n'/\\n}"'",
-                "output": "",
-                "execution_time": 0,
-                "memory_usage": 0,
-                "exit_code": 0
-              }' > result.json
-            else
-              status="${{ steps.execute_cpp.outputs.status }}"
-              message="${{ steps.execute_cpp.outputs.message }}"
-              output_content=$(cat ${{ steps.vars.outputs.output_file }})
-              error_content=$(cat ${{ steps.vars.outputs.error_file }})
-              execution_time="${{ steps.execute_cpp.outputs.execution_time }}"
-              memory_usage="${{ steps.execute_cpp.outputs.memory_usage }}"
-              exit_code="${{ steps.execute_cpp.outputs.exit_code }}"
-              
-              echo '{
-                "status": "'"$status"'",
-                "message": "'"$message"'",
-                "compile_error": "",
-                "output": "'"${output_content//$'\n'/\\n}"'",
-                "error": "'"${error_content//$'\n'/\\n}"'",
-                "execution_time": '"$execution_time"',
-                "memory_usage": '"$memory_usage"',
-                "exit_code": '"$exit_code"'
-              }' > result.json
-            fi
-          fi
-      
-      - name: Upload execution result
+          if [ "${{ steps.compile.outputs.status }}" = "CE" ]; then
+            error_msg=$(cat ${{ steps.setup.outputs.error_file }} | jq -Rsa .)
+            jq -n \
+              --arg status "CE" \
+              --arg message "Compilation Error" \
+              --arg error "$error_msg" \
+              '{status: $status, message: $message, error: $error}'
+          else
+            jq -n \
+              --arg status "${{ steps.execution.outputs.status }}" \
+              --arg message "${{ steps.execution.outputs.message }}" \
+              --arg time "${{ steps.execution.outputs.execution_time }}" \
+              --arg mem "${{ steps.execution.outputs.memory_usage }}" \
+              --arg code "${{ steps.execution.outputs.exit_code }}" \
+              --arg output "$output" \
+              --arg error "$error" \
+              '{
+                status: $status, 
+                message: $message,
+                execution_time: $time | tonumber,
+                memory_usage: $mem | tonumber,
+                exit_code: $code | tonumber,
+                output: $output,
+                error: $error
+              }'
+          fi > result.json
+
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: execution-results
+          name: code-results
           path: result.json
-          retention-days: 1
