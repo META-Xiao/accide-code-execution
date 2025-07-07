@@ -140,7 +140,7 @@ jobs:
           cat output.txt >> result.txt
       
       - name: 上传结果
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: execution-results
           path: result.txt
