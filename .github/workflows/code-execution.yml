@@ -48,30 +48,36 @@ jobs:
         run: |
           # 创建源代码文件
           if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            cat > solution.cpp << 'EOFCPP'
+            cat << 'EOFCPP' > solution.cpp
           ${{ github.event.inputs.code }}
           EOFCPP
-              elif [ "${{ github.event.inputs.language }}" == "java" ]; then
-                cat > Main.java << 'EOFJAVA'
+          elif [ "${{ github.event.inputs.language }}" == "java" ]; then
+            cat << 'EOFJAVA' > Main.java
           ${{ github.event.inputs.code }}
           EOFJAVA
-              elif [ "${{ github.event.inputs.language }}" == "python" ]; then
-                cat > solution.py << 'EOFPY'
+          elif [ "${{ github.event.inputs.language }}" == "python" ]; then
+            cat << 'EOFPY' > solution.py
           ${{ github.event.inputs.code }}
           EOFPY
-              fi
-          
+          fi
+              
           # 创建输入文件
-          cat > input.txt << 'EOFINPUT'
+          cat << 'EOFINPUT' > input.txt
           ${{ github.event.inputs.input }}
           EOFINPUT
-          
+              
           # 调试信息
           echo "显示源代码内容:"
-          cat solution.cpp || cat Main.java || cat solution.py
-          
-          # 创建输入文件
-          echo '${{ github.event.inputs.input }}' > input.txt
+          if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
+            echo "===== 源代码 ====="
+            cat solution.cpp
+            echo "================="
+            echo "文件行数: $(wc -l < solution.cpp)"
+          elif [ "${{ github.event.inputs.language }}" == "java" ]; then
+            cat Main.java
+          elif [ "${{ github.event.inputs.language }}" == "python" ]; then
+            cat solution.py
+          fi
       
       - name: 编译与执行C++
         if: ${{ github.event.inputs.language == 'cpp' }}
