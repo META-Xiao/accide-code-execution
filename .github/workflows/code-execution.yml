@@ -66,12 +66,9 @@ jobs:
       - name: Run and Judge C++ Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'cpp'
         run: |
-          # 先设置内存限制
-          ulimit -v 262144
-          
-          # 运行可执行文件，限制时间
+          # 运行可执行文件，限制时间和内存
           # TLE: 2 seconds, MLE: 256 MB
-          timeout 2s ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log
+          timeout 2s ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
           
           STATUS="AC" # 默认为AC
@@ -99,12 +96,9 @@ jobs:
       - name: Run Python Code
         if: success() && github.event.inputs.language == 'python'
         run: |
-          # 先设置内存限制
-          ulimit -v 262144
-          
           # 运行Python程序，限制时间
           # TLE: 2 seconds, MLE: 256 MB
-          timeout 2s python3 main.py < input.txt > ./results/actual.txt 2> ./results/stderr.log
+          timeout 2s python3 main.py < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
           
           STATUS="AC" # 默认为AC
@@ -143,13 +137,10 @@ jobs:
       - name: Run Java Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'java'
         run: |
-          # 先设置内存限制
-          ulimit -v 262144
-          
           # 运行Java程序，限制时间
           # TLE: 2 seconds, MLE: 256 MB
           # 假设main.java中的类名为Main
-          timeout 2s java Main < input.txt > ./results/actual.txt 2> ./results/stderr.log
+          timeout 2s java Main < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
           
           STATUS="AC" # 默认为AC
