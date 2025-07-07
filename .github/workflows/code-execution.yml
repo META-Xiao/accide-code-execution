@@ -68,7 +68,7 @@ jobs:
         run: |
           sudo apt-get update
           case "${{ steps.setup.outputs.lang }}" in
-            cpp)  sudo apt-get install -y g++ ;;
+            cpp)  sudo apt-get install -y g++ bc ;;
             java) sudo apt-get install -y openjdk-17-jdk ;;
             py)   sudo apt-get install -y python3 ;;
             js)   sudo apt-get install -y nodejs ;;
@@ -78,15 +78,14 @@ jobs:
         id: compile
         if: contains('cpp java', steps.setup.outputs.lang)
         run: |
-          # 使用正确的文件名变量
-          filename="${{ steps.setup.outputs.filename }}"
-          echo "Compiling file: $filename"
+          # 使用setup步骤输出的文件名变量
+          echo "Compiling file: ${{ steps.setup.outputs.filename }}"
           
           if [ "${{ steps.setup.outputs.lang }}" = "cpp" ]; then
-            g++ "$filename" -o program -O2 2> "${{ steps.setup.outputs.error_file }}"
+            g++ "${{ steps.setup.outputs.filename }}" -o program -O2 2> "${{ steps.setup.outputs.error_file }}"
             compile_status=$?
           elif [ "${{ steps.setup.outputs.lang }}" = "java" ]; then
-            javac "$filename" 2> "${{ steps.setup.outputs.error_file }}"
+            javac "${{ steps.setup.outputs.filename }}" 2> "${{ steps.setup.outputs.error_file }}"
             compile_status=$?
           fi
           
