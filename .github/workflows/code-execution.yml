@@ -1,6 +1,5 @@
 name: ACC-IDE Code Judge
 
-# 允许通过API调用来触发此工作流
 on:
   workflow_dispatch:
     inputs:
@@ -27,16 +26,13 @@ on:
 jobs:
   build-and-run:
     runs-on: ubuntu-latest
-    
-    # 限制job总运行时长，防止无限循环等意外情况
     timeout-minutes: 1 
 
     steps:
-      # 步骤1: 检出仓库代码 (虽然我们不直接用仓库里的代码，但这是个好习惯)
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 步骤2: 根据语言，将接收到的代码和输入写入文件
+      # 根据语言，将接收到的代码和输入写入文件
       - name: Prepare execution files
         run: |
           # 禁用错误导致的脚本终止
@@ -109,12 +105,10 @@ jobs:
           file -i $SOURCE_FILE || true
           echo "====================" || true
         
-      # 步骤3: 编译代码 (以C++为例)
       - name: Compile C++ Code
         if: github.event.inputs.language == 'cpp'
         id: compile_cpp
         run: |
-          # 禁用错误导致的脚本终止
           set +e
           
           # 输出 C++ 版本信息以进行调试
@@ -134,23 +128,42 @@ jobs:
           
           if [ $COMPILE_RESULT -ne 0 ]; then
             echo "Compilation failed with exit code: $COMPILE_RESULT" || true
-            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json || true
+            echo '{"status": "CE", "message": "Compilation Error", "execution_time": 0}' > ./results/result.json || true
             echo "JUDGE_STATUS=CE" >> $GITHUB_ENV || true
           else
             echo "Compilation successful" || true
           fi
 
-      # 步骤4: 运行代码并评测 (以C++为例)
       - name: Run and Judge C++ Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'cpp'
         run: |
           # 禁用错误导致的脚本终止
           set +e
           
+          # 创建计时脚本
+          cat > time_wrapper.sh << 'EOF'
+          #!/bin/bash
+          start_time=$(date +%s%N)
+          "$@"
+          exit_code=$?
+          end_time=$(date +%s%N)
+          execution_time=$((($end_time - $start_time) / 1000000))
+          echo $execution_time > execution_time.txt
+          exit $exit_code
+          EOF
+          
+          chmod +x time_wrapper.sh
+          
           # 运行可执行文件，限制时间和内存
           # TLE: 2 seconds, MLE: 256 MB
-          timeout 2s ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
+          timeout 2s ./time_wrapper.sh ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
+          
+          # 获取执行时间
+          EXECUTION_TIME=0
+          if [ -f execution_time.txt ]; then
+            EXECUTION_TIME=$(cat execution_time.txt)
+          fi
           
           STATUS="AC" # 默认为AC
           MESSAGE="Accepted"
@@ -163,28 +176,50 @@ jobs:
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
             # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null || true
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
             DIFF_RESULT=$?
             if [ $DIFF_RESULT -ne 0 ]; then
               STATUS="WA"
               MESSAGE="Wrong Answer"
+              
+              # 保存差异信息到文件
+              echo "=== Expected Output ===" > ./results/diff.txt
+              cat expected.txt >> ./results/diff.txt
+              echo -e "\n=== Actual Output ===" >> ./results/diff.txt
+              cat ./results/actual.txt >> ./results/diff.txt
             fi
           fi
           
-          # 生成最终的json结果
-          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json || true
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
 
-      # 添加对Python的支持
       - name: Run Python Code
         if: success() && github.event.inputs.language == 'python'
         run: |
-          # 禁用错误导致的脚本终止
           set +e
           
-          # 运行Python程序，限制时间
+          # 创建计时脚本
+          cat > time_wrapper.sh << 'EOF'
+          #!/bin/bash
+          start_time=$(date +%s%N)
+          "$@"
+          exit_code=$?
+          end_time=$(date +%s%N)
+          execution_time=$((($end_time - $start_time) / 1000000))
+          echo $execution_time > execution_time.txt
+          exit $exit_code
+          EOF
+          
+          chmod +x time_wrapper.sh
+          
           # TLE: 2 seconds, MLE: 256 MB
-          timeout 2s python3 main.py < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
+          timeout 2s ./time_wrapper.sh python3 main.py < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
+          
+          # 获取执行时间
+          EXECUTION_TIME=0
+          if [ -f execution_time.txt ]; then
+            EXECUTION_TIME=$(cat execution_time.txt)
+          fi
           
           STATUS="AC" # 默认为AC
           MESSAGE="Accepted"
@@ -196,38 +231,39 @@ jobs:
             STATUS="RE"
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
-            # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null || true
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
             DIFF_RESULT=$?
             if [ $DIFF_RESULT -ne 0 ]; then
               STATUS="WA"
               MESSAGE="Wrong Answer"
+              
+              # 保存差异信息到文件
+              echo "=== Expected Output ===" > ./results/diff.txt
+              cat expected.txt >> ./results/diff.txt
+              echo -e "\n=== Actual Output ===" >> ./results/diff.txt
+              cat ./results/actual.txt >> ./results/diff.txt
             fi
           fi
           
-          # 生成最终的json结果
-          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json || true
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
 
-      # 添加对Java的支持
+
       - name: Compile Java Code
         if: github.event.inputs.language == 'java'
         id: compile_java
         run: |
-          # 禁用错误导致的脚本终止
           set +e
           
-          # 编译Java程序
           javac main.java -d . &> ./results/compile.log || true
           COMPILE_RESULT=$?
           
-          # 输出编译日志
           echo "=== Compilation Log ===" || true
           cat ./results/compile.log || true
           echo "=======================" || true
           
           if [ $COMPILE_RESULT -ne 0 ]; then
             echo "Compilation failed with exit code: $COMPILE_RESULT" || true
-            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json || true
+            echo '{"status": "CE", "message": "Compilation Error", "execution_time": 0}' > ./results/result.json || true
             echo "JUDGE_STATUS=CE" >> $GITHUB_ENV || true
           else
             echo "Compilation successful" || true
@@ -236,14 +272,30 @@ jobs:
       - name: Run Java Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'java'
         run: |
-          # 禁用错误导致的脚本终止
           set +e
           
-          # 运行Java程序，限制时间
-          # TLE: 2 seconds, MLE: 256 MB
-          # 假设main.java中的类名为Main
-          timeout 2s java Main < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
+          # 创建计时脚本
+          cat > time_wrapper.sh << 'EOF'
+          #!/bin/bash
+          start_time=$(date +%s%N)
+          "$@"
+          exit_code=$?
+          end_time=$(date +%s%N)
+          execution_time=$((($end_time - $start_time) / 1000000))
+          echo $execution_time > execution_time.txt
+          exit $exit_code
+          EOF
+          
+          chmod +x time_wrapper.sh
+          
+          timeout 2s ./time_wrapper.sh java Main < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
+          
+          # 获取执行时间
+          EXECUTION_TIME=0
+          if [ -f execution_time.txt ]; then
+            EXECUTION_TIME=$(cat execution_time.txt)
+          fi
           
           STATUS="AC" # 默认为AC
           MESSAGE="Accepted"
@@ -255,23 +307,27 @@ jobs:
             STATUS="RE"
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
-            # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null || true
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
             DIFF_RESULT=$?
             if [ $DIFF_RESULT -ne 0 ]; then
               STATUS="WA"
               MESSAGE="Wrong Answer"
+              
+              # 保存差异信息到文件
+              echo "=== Expected Output ===" > ./results/diff.txt
+              cat expected.txt >> ./results/diff.txt
+              echo -e "\n=== Actual Output ===" >> ./results/diff.txt
+              cat ./results/actual.txt >> ./results/diff.txt
             fi
           fi
           
-          # 生成最终的json结果
-          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json || true
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
 
-      # 步骤5: 上传包含所有结果的文件夹作为 artifact
+      # 上传结果文件
       - name: Upload judgment result
         uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
           name: judge-result
           path: ./results/
-          if-no-files-found: warn # 如果结果文件没找到，只发出警告而不是失败
+          if-no-files-found: warn 
