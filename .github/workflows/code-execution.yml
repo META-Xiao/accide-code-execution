@@ -42,24 +42,56 @@ jobs:
           # 创建一个结果目录
           mkdir -p results
 
+          # 设置 UTF-8 环境变量
+          export LC_ALL=C.UTF-8
+          export LANG=C.UTF-8
+          
           # 将输入写入文件
           echo "${{ github.event.inputs.std_input }}" > input.txt
           echo "${{ github.event.inputs.expected_output }}" > expected.txt
           
           # 根据语言确定源文件名
           SOURCE_FILE="main.${{ github.event.inputs.language }}"
-          echo "${{ github.event.inputs.source_code }}" > $SOURCE_FILE
+          # 使用 cat 命令确保文件以 UTF-8 格式保存
+          echo "${{ github.event.inputs.source_code }}" | cat > $SOURCE_FILE
           echo "SOURCE_FILE=$SOURCE_FILE" >> $GITHUB_ENV
+          
+          # 显示源代码文件内容以进行调试
+          echo "=== Source Code ==="
+          cat $SOURCE_FILE
+          echo "=================="
+          
+          # 检查文件编码
+          echo "=== File Encoding ==="
+          file -i $SOURCE_FILE
+          echo "===================="
         
       # 步骤3: 编译代码 (以C++为例)
       - name: Compile C++ Code
         if: github.event.inputs.language == 'cpp'
         id: compile_cpp
         run: |
-          g++ main.cpp -o main_exec -O2 -std=c++17 &> ./results/compile.log
-          if [ $? -ne 0 ]; then
+          # 输出 C++ 版本信息以进行调试
+          g++ --version
+          
+          # 创建编译日志目录
+          mkdir -p ./results
+          
+          # 尝试编译代码
+          g++ main.cpp -o main_exec -O2 -std=c++17 -Wall -Wextra -fdiagnostics-color=always > ./results/compile.log 2>&1
+          COMPILE_RESULT=$?
+          
+          # 输出编译日志
+          echo "=== Compilation Log ==="
+          cat ./results/compile.log
+          echo "======================="
+          
+          if [ $COMPILE_RESULT -ne 0 ]; then
+            echo "Compilation failed with exit code: $COMPILE_RESULT"
             echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json
             echo "JUDGE_STATUS=CE" >> $GITHUB_ENV
+          else
+            echo "Compilation successful"
           fi
 
       # 步骤4: 运行代码并评测 (以C++为例)
