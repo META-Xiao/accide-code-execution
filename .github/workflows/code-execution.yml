@@ -173,16 +173,32 @@ jobs:
         if: github.event.inputs.language == 'java'
         id: compile_java
         run: |
+          # 禁用错误导致的脚本终止
+          set +e
+          
           # 编译Java程序
-          javac main.java -d . &> ./results/compile.log
-          if [ $? -ne 0 ]; then
-            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json
-            echo "JUDGE_STATUS=CE" >> $GITHUB_ENV
+          javac main.java -d . &> ./results/compile.log || true
+          COMPILE_RESULT=$?
+          
+          # 输出编译日志
+          echo "=== Compilation Log ===" || true
+          cat ./results/compile.log || true
+          echo "=======================" || true
+          
+          if [ $COMPILE_RESULT -ne 0 ]; then
+            echo "Compilation failed with exit code: $COMPILE_RESULT" || true
+            echo '{"status": "CE", "message": "Compilation Error"}' > ./results/result.json || true
+            echo "JUDGE_STATUS=CE" >> $GITHUB_ENV || true
+          else
+            echo "Compilation successful" || true
           fi
 
       - name: Run Java Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'java'
         run: |
+          # 禁用错误导致的脚本终止
+          set +e
+          
           # 运行Java程序，限制时间
           # TLE: 2 seconds, MLE: 256 MB
           # 假设main.java中的类名为Main
@@ -200,20 +216,22 @@ jobs:
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
             # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
-            if [ $? -ne 0 ]; then
+            diff -i -w -B ./results/actual.txt expected.txt > /dev/null || true
+            DIFF_RESULT=$?
+            if [ $DIFF_RESULT -ne 0 ]; then
               STATUS="WA"
               MESSAGE="Wrong Answer"
             fi
           fi
           
           # 生成最终的json结果
-          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json
+          echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\"}" > ./results/result.json || true
 
       # 步骤5: 上传包含所有结果的文件夹作为 artifact
       - name: Upload judgment result
         uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: judge-result
           path: ./results/
-          if-no-files-found: error # 如果结果文件没找到，就让工作流失败
+          if-no-files-found: warn # 如果结果文件没找到，只发出警告而不是失败
