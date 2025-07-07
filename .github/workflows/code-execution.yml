@@ -139,6 +139,11 @@ jobs:
           echo "输出:" >> result.txt
           cat output.txt >> result.txt
       
+
+      - name: 显示编译错误(如果有)
+        if: failure()
+        run: cat compile_error.txt
+
       - name: 上传结果
         uses: actions/upload-artifact@v4
         with:
