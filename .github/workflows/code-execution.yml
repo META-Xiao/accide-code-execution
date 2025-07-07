@@ -43,10 +43,12 @@ jobs:
 
       - name: Create files
         run: |
-          # Escape newlines in code
-          echo '${{ github.event.inputs.code }}' | sed 's/\\n/\\\\n/g' > ${{ steps.setup.outputs.filename }}
+          # 正确写入源代码文件
+          echo '${{ github.event.inputs.code }}' > "${{ steps.setup.outputs.filename }}"
+          
+          # 创建输入文件（如果有输入）
           if [ -n "${{ github.event.inputs.input }}" ]; then
-            echo '${{ github.event.inputs.input }}' > ${{ steps.setup.outputs.input_file }}
+            echo '${{ github.event.inputs.input }}' > "${{ steps.setup.outputs.input_file }}"
           fi
 
       - name: Install dependencies
@@ -58,51 +60,119 @@ jobs:
             py)   sudo apt-get install -y python3 ;;
             js)   sudo apt-get install -y nodejs ;;
           esac
-          sudo apt-get install -y bc
 
       - name: Compile code
         id: compile
         if: contains('cpp java', steps.setup.outputs.lang)
         run: |
-          case "${{ steps.setup.outputs.lang }}" in
-            cpp)
-              g++ ${{ steps.setup.outputs.filename }} -o program -O2 2> ${{ steps.setup.outputs.error_file }} || {
-                echo "status=CE" >> $GITHUB_OUTPUT
-                echo "message=Compilation Error" >> $GITHUB_OUTPUT
-                exit 0
-              }
-              ;;
-            java)
-              javac ${{ steps.setup.outputs.filename }} 2> ${{ steps.setup.outputs.error_file }} || {
-                echo "status=CE" >> $GITHUB_OUTPUT
-                echo "message=Compilation Error" >> $GITHUB_OUTPUT
-                exit 0
-              }
-              ;;
-          esac
-          echo "status=Compiled" >> $GITHUB_OUTPUT
+          # 使用变量作为文件名
+          filename="${{ steps.setup.outputs.filename }}"
+          
+          if [ "${{ steps.setup.outputs.lang }}" = "cpp" ]; then
+            g++ "$filename" -o program -O2 2> "${{ steps.setup.outputs.error_file }}"
+            compile_status=$?
+          elif [ "${{ steps.setup.outputs.lang }}" = "java" ]; then
+            javac "$filename" 2> "${{ steps.setup.outputs.error_file }}"
+            compile_status=$?
+          fi
+          
+          if [ $compile_status -ne 0 ]; then
+            echo "status=CE" >> $GITHUB_OUTPUT
+            echo "result=Compilation Error" >> $GITHUB_OUTPUT
+          else
+            echo "status=Compiled" >> $GITHUB_OUTPUT
+            echo "result=Compilation Successful" >> $GITHUB_OUTPUT
+          fi
 
       - name: Execute code
         id: execution
-        if: steps.compile.outputs.status != 'CE'
+        if: steps.compile.outputs.status == 'Compiled'
         run: |
-          # Set resource limits
-          ulimit -v 524288  # 512MB memory limit
+          # 设置内存限制
+          ulimit -v 524288  # 512MB
           
-          # Prepare input redirection
+          # 准备输入重定向
           input_redir=""
           if [ -f "${{ steps.setup.outputs.input_file }}" ]; then
             input_redir="< ${{ steps.setup.outputs.input_file }}"
           fi
           
-          # Execute with timeout
-          start=$(date +%s.%N)
+          # 执行程序
+          start_time=$(date +%s.%N)
           
-          # Use eval to handle input redirection properly
+          # 使用eval处理输入重定向
           eval "timeout 2s ${{ steps.setup.outputs.command }} $input_redir" \
-            > ${{ steps.setup.outputs.output_file }} \
-            2> ${{ steps.setup.outputs.error_file }} || true
+            > "${{ steps.setup.outputs.output_file }}" \
+            2> "${{ steps.setup.outputs.error_file }}" || true
           
           exit_code=$?
-          end=$(date +%s.%N)
-          runtime=$(echo "$end
+          end_time=$(date +%s.%N)
+          
+          # 计算执行时间
+          execution_time=$(echo "$end_time - $start_time" | bc -l || echo 0)
+          
+          # 确定执行状态
+          if [ $exit_code -eq 0 ]; then
+            status="AC"
+            message="Accepted"
+          elif [ $exit_code -eq 124 ]; then
+            status="TLE"
+            message="Time Limit Exceeded"
+          elif [ $exit_code -eq 137 ]; then
+            status="MLE"
+            message="Memory Limit Exceeded"
+          elif [ $exit_code -eq 139 ]; then
+            status="SIGSEGV"
+            message="Segmentation Fault"
+          else
+            status="RE"
+            message="Runtime Error"
+          fi
+          
+          echo "status=$status" >> $GITHUB_OUTPUT
+          echo "message=$message" >> $GITHUB_OUTPUT
+          echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+
+      - name: Generate report
+        run: |
+          # 安装jq用于JSON处理
+          sudo apt-get install -y jq
+          
+          # 读取文件内容
+          output_content=$(jq -Rs . < "${{ steps.setup.outputs.output_file }}")
+          error_content=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
+          
+          if [ "${{ steps.compile.outputs.status }}" = "CE" ]; then
+            jq -n \
+              --arg status "CE" \
+              --arg message "Compilation Error" \
+              --arg error "$error_content" \
+              '{status: $status, message: $message, error: $error}'
+          else
+            jq -n \
+              --arg status "${{ steps.execution.outputs.status }}" \
+              --arg message "${{ steps.execution.outputs.message }}" \
+              --arg time "${{ steps.execution.outputs.execution_time }}" \
+              --arg code "${{ steps.execution.outputs.exit_code }}" \
+              --arg output "$output_content" \
+              --arg error "$error_content" \
+              '{
+                status: $status, 
+                message: $message,
+                execution_time: ($time | tonumber? // 0),
+                exit_code: ($code | tonumber? // 1),
+                output: $output,
+                error: $error
+              }'
+          fi > result.json
+          
+          # 打印结果用于调试
+          echo "Result JSON:"
+          cat result.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-results
+          path: result.json
