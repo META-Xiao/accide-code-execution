@@ -11,11 +11,11 @@ on:
           - cpp
           - java
           - python
-      code:
-        description: '源代码'
+      code_base64:
+        description: '源代码 (请使用BASE64编码)'
         required: true
-      input:
-        description: '输入数据'
+      input_base64:
+        description: '输入数据 (请使用BASE64编码)'
         required: false
         default: ''
 
@@ -44,40 +44,28 @@ jobs:
         with:
           python-version: '3.10'
       
-      - name: 准备代码文件
+      - name: 准备代码文件 (从BASE64解码)
         run: |
-          # 创建源代码文件
+          # 解码源代码
           if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            cat << 'EOFCPP' > solution.cpp
-          ${{ github.event.inputs.code }}
-          EOFCPP
+            echo "${{ github.event.inputs.code_base64 }}" | base64 --decode > solution.cpp
           elif [ "${{ github.event.inputs.language }}" == "java" ]; then
-            cat << 'EOFJAVA' > Main.java
-          ${{ github.event.inputs.code }}
-          EOFJAVA
+            echo "${{ github.event.inputs.code_base64 }}" | base64 --decode > Main.java
           elif [ "${{ github.event.inputs.language }}" == "python" ]; then
-            cat << 'EOFPY' > solution.py
-          ${{ github.event.inputs.code }}
-          EOFPY
+            echo "${{ github.event.inputs.code_base64 }}" | base64 --decode > solution.py
           fi
-              
-          # 创建输入文件
-          cat << 'EOFINPUT' > input.txt
-          ${{ github.event.inputs.input }}
-          EOFINPUT
-              
-          # 调试信息
-          echo "显示源代码内容:"
-          if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            echo "===== 源代码 ====="
-            cat solution.cpp
-            echo "================="
-            echo "文件行数: $(wc -l < solution.cpp)"
-          elif [ "${{ github.event.inputs.language }}" == "java" ]; then
-            cat Main.java
-          elif [ "${{ github.event.inputs.language }}" == "python" ]; then
-            cat solution.py
+          
+          # 解码输入数据
+          if [ -n "${{ github.event.inputs.input_base64 }}" ]; then
+            echo "${{ github.event.inputs.input_base64 }}" | base64 --decode > input.txt
+          else
+            touch input.txt
           fi
+          
+          # 调试信息: 检查解码后的文件
+          echo "========= 解码后的源代码 ========="
+          cat solution.cpp || cat Main.java || cat solution.py
+          echo "==============================="
       
       - name: 编译与执行C++
         if: ${{ github.event.inputs.language == 'cpp' }}
@@ -85,27 +73,32 @@ jobs:
           # 编译
           g++ -std=c++17 solution.cpp -o solution 2> compile_error.txt
           if [ $? -ne 0 ]; then
-            echo "::error::编译错误"
+            echo "::error file=solution.cpp::编译错误"
             cat compile_error.txt
-            echo "状态: CE (编译错误)" >> result.txt
+            echo "状态: CE (编译错误)" > result.txt
+            echo "错误详情:" >> result.txt
+            cat compile_error.txt >> result.txt
             exit 0
           fi
           
           # 执行
           timeout 2s ./solution < input.txt > output.txt 2> error.txt
-          if [ $? -eq 124 ]; then
-            echo "::warning::程序超时"
-            echo "状态: TLE (超时)" >> result.txt
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 124 ]; then
+            echo "::warning file=solution.cpp::程序超时"
+            echo "状态: TLE (超时)" > result.txt
             exit 0
-          elif [ $? -ne 0 ]; then
-            echo "::error::运行时错误"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            echo "::error file=solution.cpp::运行时错误"
             cat error.txt
-            echo "状态: RE (运行时错误)" >> result.txt
+            echo "状态: RE (运行时错误)" > result.txt
+            echo "错误详情:" >> result.txt
+            cat error.txt >> result.txt
             exit 0
           fi
           
-          echo "::notice::执行成功"
-          echo "状态: AC (通过)" >> result.txt
+          echo "::notice file=solution.cpp::执行成功"
+          echo "状态: AC (通过)" > result.txt
           echo "输出:" >> result.txt
           cat output.txt >> result.txt
       
@@ -115,27 +108,32 @@ jobs:
           # 编译
           javac Main.java 2> compile_error.txt
           if [ $? -ne 0 ]; then
-            echo "::error::编译错误"
+            echo "::error file=Main.java::编译错误"
             cat compile_error.txt
-            echo "状态: CE (编译错误)" >> result.txt
+            echo "状态: CE (编译错误)" > result.txt
+            echo "错误详情:" >> result.txt
+            cat compile_error.txt >> result.txt
             exit 0
           fi
           
           # 执行
           timeout 2s java Main < input.txt > output.txt 2> error.txt
-          if [ $? -eq 124 ]; then
-            echo "::warning::程序超时"
-            echo "状态: TLE (超时)" >> result.txt
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 124 ]; then
+            echo "::warning file=Main.java::程序超时"
+            echo "状态: TLE (超时)" > result.txt
             exit 0
-          elif [ $? -ne 0 ]; then
-            echo "::error::运行时错误"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            echo "::error file=Main.java::运行时错误"
             cat error.txt
-            echo "状态: RE (运行时错误)" >> result.txt
+            echo "状态: RE (运行时错误)" > result.txt
+            echo "错误详情:" >> result.txt
+            cat error.txt >> result.txt
             exit 0
           fi
           
-          echo "::notice::执行成功"
-          echo "状态: AC (通过)" >> result.txt
+          echo "::notice file=Main.java::执行成功"
+          echo "状态: AC (通过)" > result.txt
           echo "输出:" >> result.txt
           cat output.txt >> result.txt
       
@@ -144,27 +142,25 @@ jobs:
         run: |
           # 执行
           timeout 2s python3 solution.py < input.txt > output.txt 2> error.txt
-          if [ $? -eq 124 ]; then
-            echo "::warning::程序超时"
-            echo "状态: TLE (超时)" >> result.txt
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 124 ]; then
+            echo "::warning file=solution.py::程序超时"
+            echo "状态: TLE (超时)" > result.txt
             exit 0
-          elif [ $? -ne 0 ]; then
-            echo "::error::运行时错误"
+          elif [ $EXIT_CODE -ne 0 ]; then
+            echo "::error file=solution.py::运行时错误"
             cat error.txt
-            echo "状态: RE (运行时错误)" >> result.txt
+            echo "状态: RE (运行时错误)" > result.txt
+            echo "错误详情:" >> result.txt
+            cat error.txt >> result.txt
             exit 0
           fi
           
-          echo "::notice::执行成功"
-          echo "状态: AC (通过)" >> result.txt
+          echo "::notice file=solution.py::执行成功"
+          echo "状态: AC (通过)" > result.txt
           echo "输出:" >> result.txt
           cat output.txt >> result.txt
       
-
-      - name: 显示编译错误(如果有)
-        if: failure()
-        run: cat compile_error.txt
-
       - name: 上传结果
         uses: actions/upload-artifact@v4
         with:
