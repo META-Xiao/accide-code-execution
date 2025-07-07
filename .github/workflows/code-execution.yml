@@ -59,7 +59,8 @@ jobs:
             echo '${{ github.event.inputs.input }}' > "${{ steps.setup.outputs.input_file }}"
           fi
           
-          # 显示文件列表
+          # 显示文件列表和工作目录
+          pwd
           ls -la
           echo "Source file content:"
           cat "${{ steps.setup.outputs.filename }}"
@@ -68,13 +69,29 @@ jobs:
         run: |
           sudo apt-get update
           case "${{ steps.setup.outputs.lang }}" in
-            cpp)  sudo apt-get install -y g++ bc ;;
+            cpp)  
+              sudo apt-get install -y g++ bc
+              g++ --version
+              ;;
             java) sudo apt-get install -y openjdk-17-jdk ;;
             py)   sudo apt-get install -y python3 ;;
             js)   sudo apt-get install -y nodejs ;;
           esac
 
-      - name: Compile code
+      - name: Verify file exists
+        run: |
+          echo "Working directory: $(pwd)"
+          echo "File absolute path: $(realpath ${{ steps.setup.outputs.filename }})"
+          if [ -f "${{ steps.setup.outputs.filename }}" ]; then
+            echo "File exists and is readable"
+            ls -la "${{ steps.setup.outputs.filename }}"
+            file "${{ steps.setup.outputs.filename }}"
+          else
+            echo "File does not exist or is not readable"
+            exit 1
+          fi
+
+      - name: Compile code with debug
         id: compile
         if: contains('cpp java', steps.setup.outputs.lang)
         run: |
@@ -82,14 +99,22 @@ jobs:
           echo "Compiling file: ${{ steps.setup.outputs.filename }}"
           
           if [ "${{ steps.setup.outputs.lang }}" = "cpp" ]; then
-            g++ "${{ steps.setup.outputs.filename }}" -o program -O2 2> "${{ steps.setup.outputs.error_file }}"
+            echo "Running: g++ \"${{ steps.setup.outputs.filename }}\" -o program -O2 -Wall -Wextra"
+            # 使用set -x打开shell调试模式
+            set -x
+            g++ "${{ steps.setup.outputs.filename }}" -o program -O2 -Wall -Wextra 2> "${{ steps.setup.outputs.error_file }}"
             compile_status=$?
+            set +x
           elif [ "${{ steps.setup.outputs.lang }}" = "java" ]; then
+            echo "Running: javac \"${{ steps.setup.outputs.filename }}\""
+            set -x
             javac "${{ steps.setup.outputs.filename }}" 2> "${{ steps.setup.outputs.error_file }}"
             compile_status=$?
+            set +x
           fi
           
           if [ $compile_status -ne 0 ]; then
+            echo "Compilation failed with status: $compile_status"
             echo "status=CE" >> $GITHUB_OUTPUT
             echo "result=Compilation Error" >> $GITHUB_OUTPUT
             echo "Compilation error details:"
@@ -116,10 +141,13 @@ jobs:
           # 执行程序
           start_time=$(date +%s.%N)
           
+          echo "Running: ${{ steps.setup.outputs.command }} $input_redir"
           # 使用eval处理输入重定向
+          set -x
           eval "timeout 2s ${{ steps.setup.outputs.command }} $input_redir" \
             > "${{ steps.setup.outputs.output_file }}" \
             2> "${{ steps.setup.outputs.error_file }}" || true
+          set +x
           
           exit_code=$?
           end_time=$(date +%s.%N)
@@ -153,14 +181,31 @@ jobs:
           echo "Execution status: $status"
           echo "Exit code: $exit_code"
           echo "Execution time: $execution_time seconds"
+          
+          echo "Program output:"
+          cat "${{ steps.setup.outputs.output_file }}"
+          
+          if [ -s "${{ steps.setup.outputs.error_file }}" ]; then
+            echo "Error output:"
+            cat "${{ steps.setup.outputs.error_file }}"
+          fi
 
       - name: Generate report
         run: |
           sudo apt-get install -y jq
           
           # 读取文件内容
-          output_content=$(jq -Rs . < "${{ steps.setup.outputs.output_file }}")
-          error_content=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
+          if [ -f "${{ steps.setup.outputs.output_file }}" ]; then
+            output_content=$(jq -Rs . < "${{ steps.setup.outputs.output_file }}")
+          else
+            output_content='""'
+          fi
+          
+          if [ -f "${{ steps.setup.outputs.error_file }}" ]; then
+            error_content=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
+          else
+            error_content='""'
+          fi
           
           if [ "${{ steps.compile.outputs.status }}" = "CE" ]; then
             compile_error=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
