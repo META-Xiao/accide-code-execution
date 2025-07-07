@@ -40,11 +40,11 @@ jobs:
           echo "input_file=input.txt" >> $GITHUB_OUTPUT
           echo "output_file=output.txt" >> $GITHUB_OUTPUT
           echo "error_file=error.txt" >> $GITHUB_OUTPUT
-          echo "time_mem=time_mem.txt" >> $GITHUB_OUTPUT
 
       - name: Create files
         run: |
-          echo '${{ github.event.inputs.code }}' > ${{ steps.setup.outputs.filename }}
+          # Escape newlines in code
+          echo '${{ github.event.inputs.code }}' | sed 's/\\n/\\\\n/g' > ${{ steps.setup.outputs.filename }}
           if [ -n "${{ github.event.inputs.input }}" ]; then
             echo '${{ github.event.inputs.input }}' > ${{ steps.setup.outputs.input_file }}
           fi
@@ -58,9 +58,10 @@ jobs:
             py)   sudo apt-get install -y python3 ;;
             js)   sudo apt-get install -y nodejs ;;
           esac
-          sudo apt-get install -y time bc
+          sudo apt-get install -y bc
 
       - name: Compile code
+        id: compile
         if: contains('cpp java', steps.setup.outputs.lang)
         run: |
           case "${{ steps.setup.outputs.lang }}" in
@@ -87,89 +88,21 @@ jobs:
         run: |
           # Set resource limits
           ulimit -v 524288  # 512MB memory limit
-
-          # Prepare input
-          [ -f "${{ steps.setup.outputs.input_file }}" ] && input_redir="< ${{ steps.setup.outputs.input_file }}" || input_redir=""
-
-          # Execute with measurements
+          
+          # Prepare input redirection
+          input_redir=""
+          if [ -f "${{ steps.setup.outputs.input_file }}" ]; then
+            input_redir="< ${{ steps.setup.outputs.input_file }}"
+          fi
+          
+          # Execute with timeout
           start=$(date +%s.%N)
-          /usr/bin/time -f "%e %M" -o ${{ steps.setup.outputs.time_mem }} timeout 2s \
-            sh -c "${{ steps.setup.outputs.command }} $input_redir" \
+          
+          # Use eval to handle input redirection properly
+          eval "timeout 2s ${{ steps.setup.outputs.command }} $input_redir" \
             > ${{ steps.setup.outputs.output_file }} \
             2> ${{ steps.setup.outputs.error_file }} || true
+          
           exit_code=$?
           end=$(date +%s.%N)
-          
-          # Calculate execution time
-          runtime=$(echo "$end - $start" | bc -l)
-          [ -z "$runtime" ] && runtime=0
-
-          # Get memory usage
-          if [ -f "${{ steps.setup.outputs.time_mem }}" ]; then
-            mem_usage=$(awk '{print $2}' ${{ steps.setup.outputs.time_mem }})
-          else
-            mem_usage=0
-          fi
-
-          # Determine result status
-          if [ $exit_code -eq 0 ]; then
-            status="AC"
-            message="Execution Successful"
-          elif [ $exit_code -eq 124 ]; then
-            status="TLE"
-            message="Time Limit Exceeded"
-          elif [ $mem_usage -gt 524288 ]; then
-            status="MLE"
-            message="Memory Limit Exceeded"
-          elif [ $exit_code -eq 139 ]; then
-            status="SIGSEGV"
-            message="Segmentation Fault"
-          else
-            status="RE"
-            message="Runtime Error"
-          fi
-
-          echo "status=$status" >> $GITHUB_OUTPUT
-          echo "message=$message" >> $GITHUB_OUTPUT
-          echo "execution_time=$runtime" >> $GITHUB_OUTPUT
-          echo "memory_usage=$mem_usage" >> $GITHUB_OUTPUT
-          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
-
-      - name: Generate report
-        run: |
-          # Prepare data
-          output=$(cat ${{ steps.setup.outputs.output_file }} | jq -Rsa .)
-          error=$(cat ${{ steps.setup.outputs.error_file }} | jq -Rsa .)
-          
-          if [ "${{ steps.compile.outputs.status }}" = "CE" ]; then
-            error_msg=$(cat ${{ steps.setup.outputs.error_file }} | jq -Rsa .)
-            jq -n \
-              --arg status "CE" \
-              --arg message "Compilation Error" \
-              --arg error "$error_msg" \
-              '{status: $status, message: $message, error: $error}'
-          else
-            jq -n \
-              --arg status "${{ steps.execution.outputs.status }}" \
-              --arg message "${{ steps.execution.outputs.message }}" \
-              --arg time "${{ steps.execution.outputs.execution_time }}" \
-              --arg mem "${{ steps.execution.outputs.memory_usage }}" \
-              --arg code "${{ steps.execution.outputs.exit_code }}" \
-              --arg output "$output" \
-              --arg error "$error" \
-              '{
-                status: $status, 
-                message: $message,
-                execution_time: $time | tonumber,
-                memory_usage: $mem | tonumber,
-                exit_code: $code | tonumber,
-                output: $output,
-                error: $error
-              }'
-          fi > result.json
-
-      - name: Upload results
-        uses: actions/upload-artifact@v4
-        with:
-          name: code-results
-          path: result.json
+          runtime=$(echo "$end
