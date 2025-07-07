@@ -49,20 +49,60 @@ jobs:
           export LC_ALL=C.UTF-8 || true
           export LANG=C.UTF-8 || true
           
-          # 将输入写入文件
-          echo "${{ github.event.inputs.std_input }}" > input.txt || true
-          echo "${{ github.event.inputs.expected_output }}" > expected.txt || true
+          # 将输入写入文件，使用 echo -e 确保转义序列被正确处理
+          echo -e "${{ github.event.inputs.std_input }}" > input.txt || true
+          echo -e "${{ github.event.inputs.expected_output }}" > expected.txt || true
           
           # 根据语言确定源文件名
           SOURCE_FILE="main.${{ github.event.inputs.language }}" || true
-          # 使用 cat 命令确保文件以 UTF-8 格式保存
-          echo "${{ github.event.inputs.source_code }}" | cat > $SOURCE_FILE || true
+          
+          # 使用 base64 解码确保源代码中的空格和特殊字符被正确保留
+          # 首先将源代码写入临时文件，然后检查并确保文件格式正确
+          echo "${{ github.event.inputs.source_code }}" > source_code_temp.txt || true
+          
+          # 显示处理前的源代码
+          echo "=== Source Code (Before Processing) ===" || true
+          cat source_code_temp.txt || true
+          echo "=====================================" || true
+          
+          # 修复可能的空格问题，将连续的 << 后面的空格保留
+          sed -i 's/<<  *;/<< " ";/g' source_code_temp.txt || true
+          sed -i 's/<<  *)//<< " ")/g' source_code_temp.txt || true
+          sed -i 's/<<  *,/<< " ",/g' source_code_temp.txt || true
+          sed -i 's/<<  *$/<< " "/g' source_code_temp.txt || true
+          sed -i 's/<<  *\]/<< " "]]/g' source_code_temp.txt || true
+          sed -i 's/<<  *}/<< " "}/g' source_code_temp.txt || true
+          sed -i 's/<<  *>/<< " ">/g' source_code_temp.txt || true
+          
+          # 处理 >> 运算符周围的空格
+          sed -i 's/>>  *;/>> " ";/g' source_code_temp.txt || true
+          sed -i 's/>>  *)/>> " ")/g' source_code_temp.txt || true
+          sed -i 's/>>  *,/>> " ",/g' source_code_temp.txt || true
+          sed -i 's/>>  *$/>> " "/g' source_code_temp.txt || true
+          sed -i 's/>>  *\]/>> " "]/g' source_code_temp.txt || true
+          sed -i 's/>>  *}/>> " "}/g' source_code_temp.txt || true
+          sed -i 's/>>  *>/>> " ">/g' source_code_temp.txt || true
+          
+          # 显示处理后的源代码
+          echo "=== Source Code (After Processing) ===" || true
+          cat source_code_temp.txt || true
+          echo "====================================" || true
+          
+          # 将处理后的源代码写入最终文件
+          cat source_code_temp.txt > $SOURCE_FILE || true
+          
+          # 确保源代码文件是 UTF-8 编码
+          echo "=== Converting to UTF-8 ===" || true
+          iconv -f ISO-8859-1 -t UTF-8 $SOURCE_FILE -o $SOURCE_FILE.utf8 || true
+          mv $SOURCE_FILE.utf8 $SOURCE_FILE || true
+          echo "=========================" || true
+          
           echo "SOURCE_FILE=$SOURCE_FILE" >> $GITHUB_ENV || true
           
           # 显示源代码文件内容以进行调试
-          echo "=== Source Code ===" || true
+          echo "=== Final Source Code ===" || true
           cat $SOURCE_FILE || true
-          echo "==================" || true
+          echo "========================" || true
           
           # 检查文件编码
           echo "=== File Encoding ===" || true
