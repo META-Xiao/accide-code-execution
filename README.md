@@ -10,3 +10,7 @@
 2. 在GitHub的用户设置中，找到 `Developer Settings` -> `Personal access tokens` -> `Generate new token` -> `Generate new token (classic) ` -> 勾选 `repo`和`workflow` -> `Generate token` -> 复制保存生成的token
 3. 把你fork的仓库地址和生成的token填入ACCIDE的 `设置` 中
 
+## 注意事项
+
+- 本项目使用GitHub Actions来运行后端，GitHub Actions对免费的个人账户有每月2000分钟的免费运行时间，所以如果运行时间过长可能会被暂停，请尽量减少运行时间。
+- 如果发现了bug或者有更好的建议，欢迎提交issue或者pull request🤗。

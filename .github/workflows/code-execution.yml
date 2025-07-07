@@ -165,7 +165,7 @@ jobs:
             EXECUTION_TIME=$(cat execution_time.txt)
           fi
           
-          STATUS="AC" # 默认为AC
+          STATUS="AC"
           MESSAGE="Accepted"
 
           if [ $EXIT_CODE -eq 124 ]; then
@@ -196,8 +196,7 @@ jobs:
         if: success() && github.event.inputs.language == 'python'
         run: |
           set +e
-          
-          # 创建计时脚本
+
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
           start_time=$(date +%s%N)
@@ -211,17 +210,15 @@ jobs:
           
           chmod +x time_wrapper.sh
           
-          # TLE: 2 seconds, MLE: 256 MB
           timeout 2s ./time_wrapper.sh python3 main.py < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
           
-          # 获取执行时间
           EXECUTION_TIME=0
           if [ -f execution_time.txt ]; then
             EXECUTION_TIME=$(cat execution_time.txt)
           fi
           
-          STATUS="AC" # 默认为AC
+          STATUS="AC"
           MESSAGE="Accepted"
 
           if [ $EXIT_CODE -eq 124 ]; then
@@ -237,7 +234,6 @@ jobs:
               STATUS="WA"
               MESSAGE="Wrong Answer"
               
-              # 保存差异信息到文件
               echo "=== Expected Output ===" > ./results/diff.txt
               cat expected.txt >> ./results/diff.txt
               echo -e "\n=== Actual Output ===" >> ./results/diff.txt
@@ -274,7 +270,6 @@ jobs:
         run: |
           set +e
           
-          # 创建计时脚本
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
           start_time=$(date +%s%N)
@@ -291,13 +286,12 @@ jobs:
           timeout 2s ./time_wrapper.sh java Main < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
           
-          # 获取执行时间
           EXECUTION_TIME=0
           if [ -f execution_time.txt ]; then
             EXECUTION_TIME=$(cat execution_time.txt)
           fi
           
-          STATUS="AC" # 默认为AC
+          STATUS="AC" 
           MESSAGE="Accepted"
 
           if [ $EXIT_CODE -eq 124 ]; then
@@ -313,7 +307,6 @@ jobs:
               STATUS="WA"
               MESSAGE="Wrong Answer"
               
-              # 保存差异信息到文件
               echo "=== Expected Output ===" > ./results/diff.txt
               cat expected.txt >> ./results/diff.txt
               echo -e "\n=== Actual Output ===" >> ./results/diff.txt
