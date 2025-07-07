@@ -41,15 +41,28 @@ jobs:
           echo "output_file=output.txt" >> $GITHUB_OUTPUT
           echo "error_file=error.txt" >> $GITHUB_OUTPUT
 
+      - name: Debug setup
+        run: |
+          echo "Filename: ${{ steps.setup.outputs.filename }}"
+          echo "Language: ${{ steps.setup.outputs.lang }}"
+          echo "Command: ${{ steps.setup.outputs.command }}"
+
       - name: Create files
         run: |
-          # 正确写入源代码文件
-          echo '${{ github.event.inputs.code }}' > "${{ steps.setup.outputs.filename }}"
+          # 创建源代码文件
+          cat << 'EOF' > "${{ steps.setup.outputs.filename }}"
+          ${{ github.event.inputs.code }}
+          EOF
           
           # 创建输入文件（如果有输入）
           if [ -n "${{ github.event.inputs.input }}" ]; then
             echo '${{ github.event.inputs.input }}' > "${{ steps.setup.outputs.input_file }}"
           fi
+          
+          # 显示文件列表
+          ls -la
+          echo "Source file content:"
+          cat "${{ steps.setup.outputs.filename }}"
 
       - name: Install dependencies
         run: |
@@ -65,8 +78,9 @@ jobs:
         id: compile
         if: contains('cpp java', steps.setup.outputs.lang)
         run: |
-          # 使用变量作为文件名
+          # 使用正确的文件名变量
           filename="${{ steps.setup.outputs.filename }}"
+          echo "Compiling file: $filename"
           
           if [ "${{ steps.setup.outputs.lang }}" = "cpp" ]; then
             g++ "$filename" -o program -O2 2> "${{ steps.setup.outputs.error_file }}"
@@ -79,9 +93,12 @@ jobs:
           if [ $compile_status -ne 0 ]; then
             echo "status=CE" >> $GITHUB_OUTPUT
             echo "result=Compilation Error" >> $GITHUB_OUTPUT
+            echo "Compilation error details:"
+            cat "${{ steps.setup.outputs.error_file }}"
           else
             echo "status=Compiled" >> $GITHUB_OUTPUT
             echo "result=Compilation Successful" >> $GITHUB_OUTPUT
+            echo "Compilation successful!"
           fi
 
       - name: Execute code
@@ -133,10 +150,13 @@ jobs:
           echo "message=$message" >> $GITHUB_OUTPUT
           echo "execution_time=$execution_time" >> $GITHUB_OUTPUT
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          
+          echo "Execution status: $status"
+          echo "Exit code: $exit_code"
+          echo "Execution time: $execution_time seconds"
 
       - name: Generate report
         run: |
-          # 安装jq用于JSON处理
           sudo apt-get install -y jq
           
           # 读取文件内容
@@ -144,10 +164,11 @@ jobs:
           error_content=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
           
           if [ "${{ steps.compile.outputs.status }}" = "CE" ]; then
+            compile_error=$(jq -Rs . < "${{ steps.setup.outputs.error_file }}")
             jq -n \
               --arg status "CE" \
               --arg message "Compilation Error" \
-              --arg error "$error_content" \
+              --arg error "$compile_error" \
               '{status: $status, message: $message, error: $error}'
           else
             jq -n \
@@ -167,8 +188,7 @@ jobs:
               }'
           fi > result.json
           
-          # 打印结果用于调试
-          echo "Result JSON:"
+          echo "Generated result.json:"
           cat result.json
 
       - name: Upload results
