@@ -48,12 +48,27 @@ jobs:
         run: |
           # 创建源代码文件
           if [ "${{ github.event.inputs.language }}" == "cpp" ]; then
-            echo '${{ github.event.inputs.code }}' > solution.cpp
-          elif [ "${{ github.event.inputs.language }}" == "java" ]; then
-            echo '${{ github.event.inputs.code }}' > Main.java
-          elif [ "${{ github.event.inputs.language }}" == "python" ]; then
-            echo '${{ github.event.inputs.code }}' > solution.py
-          fi
+            cat > solution.cpp << 'EOFCPP'
+          ${{ github.event.inputs.code }}
+          EOFCPP
+              elif [ "${{ github.event.inputs.language }}" == "java" ]; then
+                cat > Main.java << 'EOFJAVA'
+          ${{ github.event.inputs.code }}
+          EOFJAVA
+              elif [ "${{ github.event.inputs.language }}" == "python" ]; then
+                cat > solution.py << 'EOFPY'
+          ${{ github.event.inputs.code }}
+          EOFPY
+              fi
+          
+          # 创建输入文件
+          cat > input.txt << 'EOFINPUT'
+          ${{ github.event.inputs.input }}
+          EOFINPUT
+          
+          # 调试信息
+          echo "显示源代码内容:"
+          cat solution.cpp || cat Main.java || cat solution.py
           
           # 创建输入文件
           echo '${{ github.event.inputs.input }}' > input.txt
