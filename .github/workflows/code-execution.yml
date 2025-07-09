@@ -49,6 +49,13 @@ jobs:
           echo -e "${{ github.event.inputs.std_input }}" > input.txt || true
           echo -e "${{ github.event.inputs.expected_output }}" > expected.txt || true
           
+          # 检查预期输出是否为空，设置一个标志
+          if [ ! -s expected.txt ]; then
+            echo "EXPECTED_EMPTY=true" >> $GITHUB_ENV || true
+          else
+            echo "EXPECTED_EMPTY=false" >> $GITHUB_ENV || true
+          fi
+          
           # 根据语言确定源文件名
           SOURCE_FILE="main.${{ github.event.inputs.language }}" || true
           
@@ -137,10 +144,9 @@ jobs:
       - name: Run and Judge C++ Code
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'cpp'
         run: |
-          # 禁用错误导致的脚本终止
           set +e
           
-          # 创建计时脚本
+          # 计时脚本
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
           start_time=$(date +%s%N)
@@ -154,7 +160,7 @@ jobs:
           
           chmod +x time_wrapper.sh
           
-          # 运行可执行文件，限制时间和内存
+          # 运行文件并限制时间和内存
           # TLE: 2 seconds, MLE: 256 MB
           timeout 2s ./time_wrapper.sh ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
@@ -165,9 +171,6 @@ jobs:
             EXECUTION_TIME=$(cat execution_time.txt)
           fi
           
-          STATUS="AC"
-          MESSAGE="Accepted"
-
           if [ $EXIT_CODE -eq 124 ]; then
             STATUS="TLE"
             MESSAGE="Time Limit Exceeded"
@@ -175,18 +178,27 @@ jobs:
             STATUS="RE"
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
-            # 使用 diff 命令比较输出。-i 忽略大小写, -w 忽略所有空格, -B 忽略空行
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
-            DIFF_RESULT=$?
-            if [ $DIFF_RESULT -ne 0 ]; then
-              STATUS="WA"
-              MESSAGE="Wrong Answer"
-              
-              # 保存差异信息到文件
-              echo "=== Expected Output ===" > ./results/diff.txt
-              cat expected.txt >> ./results/diff.txt
-              echo -e "\n=== Actual Output ===" >> ./results/diff.txt
-              cat ./results/actual.txt >> ./results/diff.txt
+            # 检查预期输出是否为空，如果为空则设置为"RS"(Run Successful)
+            if [ "$EXPECTED_EMPTY" = "true" ]; then
+              STATUS="RS"
+              MESSAGE="Run Successful"
+            else
+              # 使用 diff 命令比较输出。
+              # -i 忽略大小写, -w 忽略所有空格, -B 忽略空行
+              diff -i -w -B ./results/actual.txt expected.txt > /dev/null
+              DIFF_RESULT=$?
+              if [ $DIFF_RESULT -ne 0 ]; then
+                STATUS="WA"
+                MESSAGE="Wrong Answer"
+                
+                echo "=== Expected Output ===" > ./results/diff.txt
+                cat expected.txt >> ./results/diff.txt
+                echo -e "\n=== Actual Output ===" >> ./results/diff.txt
+                cat ./results/actual.txt >> ./results/diff.txt
+              else
+                STATUS="AC"
+                MESSAGE="Accepted"
+              fi
             fi
           fi
           
@@ -218,9 +230,6 @@ jobs:
             EXECUTION_TIME=$(cat execution_time.txt)
           fi
           
-          STATUS="AC"
-          MESSAGE="Accepted"
-
           if [ $EXIT_CODE -eq 124 ]; then
             STATUS="TLE"
             MESSAGE="Time Limit Exceeded"
@@ -228,16 +237,24 @@ jobs:
             STATUS="RE"
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
-            DIFF_RESULT=$?
-            if [ $DIFF_RESULT -ne 0 ]; then
-              STATUS="WA"
-              MESSAGE="Wrong Answer"
-              
-              echo "=== Expected Output ===" > ./results/diff.txt
-              cat expected.txt >> ./results/diff.txt
-              echo -e "\n=== Actual Output ===" >> ./results/diff.txt
-              cat ./results/actual.txt >> ./results/diff.txt
+            if [ "$EXPECTED_EMPTY" = "true" ]; then
+              STATUS="RS"
+              MESSAGE="Run Successful"
+            else
+              diff -i -w -B ./results/actual.txt expected.txt > /dev/null
+              DIFF_RESULT=$?
+              if [ $DIFF_RESULT -ne 0 ]; then
+                STATUS="WA"
+                MESSAGE="Wrong Answer"
+                
+                echo "=== Expected Output ===" > ./results/diff.txt
+                cat expected.txt >> ./results/diff.txt
+                echo -e "\n=== Actual Output ===" >> ./results/diff.txt
+                cat ./results/actual.txt >> ./results/diff.txt
+              else
+                STATUS="AC"
+                MESSAGE="Accepted"
+              fi
             fi
           fi
           
@@ -291,9 +308,6 @@ jobs:
             EXECUTION_TIME=$(cat execution_time.txt)
           fi
           
-          STATUS="AC" 
-          MESSAGE="Accepted"
-
           if [ $EXIT_CODE -eq 124 ]; then
             STATUS="TLE"
             MESSAGE="Time Limit Exceeded"
@@ -301,16 +315,24 @@ jobs:
             STATUS="RE"
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
-            diff -i -w -B ./results/actual.txt expected.txt > /dev/null
-            DIFF_RESULT=$?
-            if [ $DIFF_RESULT -ne 0 ]; then
-              STATUS="WA"
-              MESSAGE="Wrong Answer"
-              
-              echo "=== Expected Output ===" > ./results/diff.txt
-              cat expected.txt >> ./results/diff.txt
-              echo -e "\n=== Actual Output ===" >> ./results/diff.txt
-              cat ./results/actual.txt >> ./results/diff.txt
+            if [ "$EXPECTED_EMPTY" = "true" ]; then
+              STATUS="RS" 
+              MESSAGE="Run Successful"
+            else
+              diff -i -w -B ./results/actual.txt expected.txt > /dev/null
+              DIFF_RESULT=$?
+              if [ $DIFF_RESULT -ne 0 ]; then
+                STATUS="WA"
+                MESSAGE="Wrong Answer"
+                
+                echo "=== Expected Output ===" > ./results/diff.txt
+                cat expected.txt >> ./results/diff.txt
+                echo -e "\n=== Actual Output ===" >> ./results/diff.txt
+                cat ./results/actual.txt >> ./results/diff.txt
+              else
+                STATUS="AC"
+                MESSAGE="Accepted"
+              fi
             fi
           fi
           
