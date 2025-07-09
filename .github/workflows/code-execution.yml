@@ -124,8 +124,6 @@ jobs:
         id: compile_cpp
         run: |
           set +e
-          
-          # 输出 C++ 版本信息以进行调试
           g++ --version || true
           
           # 创建编译日志目录
@@ -153,13 +151,12 @@ jobs:
         run: |
           set +e
           
-          # 再次检查预期输出是否为空（以防环境变量未正确传递）
+          # 检查预期输出是否为空
           if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             EXPECTED_EMPTY=true
           else
             EXPECTED_EMPTY=false
           fi
-          echo "C++ 检查预期输出: EXPECTED_EMPTY=$EXPECTED_EMPTY" || true
           
           # 计时脚本
           cat > time_wrapper.sh << 'EOF'
@@ -193,11 +190,10 @@ jobs:
             STATUS="RE"
             MESSAGE="Runtime Error (Exit Code: $EXIT_CODE)"
           else
-            # 检查预期输出是否为空，如果为空则设置为"RS"(Run Successful)
+            # 检查预期是否为空，空则"RS"(Run Successful)
             if [ "$EXPECTED_EMPTY" = "true" ]; then
               STATUS="RS"
               MESSAGE="Run Successful"
-              # 直接跳过比较逻辑
             else
               # 使用 diff 命令比较输出。
               # -i 忽略大小写, -w 忽略所有空格, -B 忽略空行
@@ -236,13 +232,11 @@ jobs:
         run: |
           set +e
 
-          # 再次检查预期输出是否为空（以防环境变量未正确传递）
           if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             EXPECTED_EMPTY=true
           else
             EXPECTED_EMPTY=false
           fi
-          echo "Python 检查预期输出: EXPECTED_EMPTY=$EXPECTED_EMPTY" || true
           
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
@@ -275,7 +269,6 @@ jobs:
             if [ "$EXPECTED_EMPTY" = "true" ]; then
               STATUS="RS"
               MESSAGE="Run Successful"
-              # 直接跳过比较逻辑
             else
               diff -i -w -B ./results/actual.txt expected.txt > /dev/null
               DIFF_RESULT=$?
@@ -296,7 +289,6 @@ jobs:
           
           echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
 
-          # 输出调试信息
           echo "=== DEBUG INFO (Python) ===" || true
           echo "Input:" || true
           cat input.txt || true
@@ -334,13 +326,11 @@ jobs:
         run: |
           set +e
           
-          # 再次检查预期输出是否为空（以防环境变量未正确传递）
           if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             EXPECTED_EMPTY=true
           else
             EXPECTED_EMPTY=false
           fi
-          echo "Java 检查预期输出: EXPECTED_EMPTY=$EXPECTED_EMPTY" || true
           
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
@@ -373,7 +363,6 @@ jobs:
             if [ "$EXPECTED_EMPTY" = "true" ]; then
               STATUS="RS" 
               MESSAGE="Run Successful"
-              # 直接跳过比较逻辑
             else
               diff -i -w -B ./results/actual.txt expected.txt > /dev/null
               DIFF_RESULT=$?
@@ -394,7 +383,6 @@ jobs:
           
           echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
 
-          # 输出调试信息
           echo "=== DEBUG INFO (Java) ===" || true
           echo "Input:" || true
           cat input.txt || true
