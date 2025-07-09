@@ -50,11 +50,18 @@ jobs:
           echo -e "${{ github.event.inputs.expected_output }}" > expected.txt || true
           
           # 检查预期输出是否为空，设置一个标志
-          if [ ! -s expected.txt ]; then
+          if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             echo "EXPECTED_EMPTY=true" >> $GITHUB_ENV || true
+            echo "预期输出为空，设置 EXPECTED_EMPTY=true" || true
           else
             echo "EXPECTED_EMPTY=false" >> $GITHUB_ENV || true
+            echo "预期输出不为空，设置 EXPECTED_EMPTY=false" || true
           fi
+          
+          # 显示预期输出内容
+          echo "=== Expected Output Content ===" || true
+          cat expected.txt || true
+          echo "===============================" || true
           
           # 根据语言确定源文件名
           SOURCE_FILE="main.${{ github.event.inputs.language }}" || true
@@ -146,6 +153,14 @@ jobs:
         run: |
           set +e
           
+          # 再次检查预期输出是否为空（以防环境变量未正确传递）
+          if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
+            EXPECTED_EMPTY=true
+          else
+            EXPECTED_EMPTY=false
+          fi
+          echo "C++ 检查预期输出: EXPECTED_EMPTY=$EXPECTED_EMPTY" || true
+          
           # 计时脚本
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
@@ -221,6 +236,14 @@ jobs:
         run: |
           set +e
 
+          # 再次检查预期输出是否为空（以防环境变量未正确传递）
+          if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
+            EXPECTED_EMPTY=true
+          else
+            EXPECTED_EMPTY=false
+          fi
+          echo "Python 检查预期输出: EXPECTED_EMPTY=$EXPECTED_EMPTY" || true
+          
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
           start_time=$(date +%s%N)
@@ -310,6 +333,14 @@ jobs:
         if: success() && env.JUDGE_STATUS != 'CE' && github.event.inputs.language == 'java'
         run: |
           set +e
+          
+          # 再次检查预期输出是否为空（以防环境变量未正确传递）
+          if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
+            EXPECTED_EMPTY=true
+          else
+            EXPECTED_EMPTY=false
+          fi
+          echo "Java 检查预期输出: EXPECTED_EMPTY=$EXPECTED_EMPTY" || true
           
           cat > time_wrapper.sh << 'EOF'
           #!/bin/bash
