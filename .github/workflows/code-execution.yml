@@ -182,6 +182,7 @@ jobs:
             if [ "$EXPECTED_EMPTY" = "true" ]; then
               STATUS="RS"
               MESSAGE="Run Successful"
+              # 直接跳过比较逻辑
             else
               # 使用 diff 命令比较输出。
               # -i 忽略大小写, -w 忽略所有空格, -B 忽略空行
@@ -203,6 +204,17 @@ jobs:
           fi
           
           echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
+
+          # 输出调试信息
+          echo "=== DEBUG INFO (C++) ===" || true
+          echo "Input:" || true
+          cat input.txt || true
+          echo -e "\nExpected Output:" || true
+          cat expected.txt || true
+          echo -e "\nActual Output:" || true
+          cat ./results/actual.txt || true
+          echo -e "\nStatus: $STATUS (EXPECTED_EMPTY=$EXPECTED_EMPTY)" || true
+          echo "===========================" || true
 
       - name: Run Python Code
         if: success() && github.event.inputs.language == 'python'
@@ -240,6 +252,7 @@ jobs:
             if [ "$EXPECTED_EMPTY" = "true" ]; then
               STATUS="RS"
               MESSAGE="Run Successful"
+              # 直接跳过比较逻辑
             else
               diff -i -w -B ./results/actual.txt expected.txt > /dev/null
               DIFF_RESULT=$?
@@ -259,6 +272,17 @@ jobs:
           fi
           
           echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
+
+          # 输出调试信息
+          echo "=== DEBUG INFO (Python) ===" || true
+          echo "Input:" || true
+          cat input.txt || true
+          echo -e "\nExpected Output:" || true
+          cat expected.txt || true
+          echo -e "\nActual Output:" || true
+          cat ./results/actual.txt || true
+          echo -e "\nStatus: $STATUS (EXPECTED_EMPTY=$EXPECTED_EMPTY)" || true
+          echo "===========================" || true
 
 
       - name: Compile Java Code
@@ -318,6 +342,7 @@ jobs:
             if [ "$EXPECTED_EMPTY" = "true" ]; then
               STATUS="RS" 
               MESSAGE="Run Successful"
+              # 直接跳过比较逻辑
             else
               diff -i -w -B ./results/actual.txt expected.txt > /dev/null
               DIFF_RESULT=$?
@@ -337,6 +362,17 @@ jobs:
           fi
           
           echo "{\"status\": \"$STATUS\", \"message\": \"$MESSAGE\", \"execution_time\": $EXECUTION_TIME}" > ./results/result.json
+
+          # 输出调试信息
+          echo "=== DEBUG INFO (Java) ===" || true
+          echo "Input:" || true
+          cat input.txt || true
+          echo -e "\nExpected Output:" || true
+          cat expected.txt || true
+          echo -e "\nActual Output:" || true
+          cat ./results/actual.txt || true
+          echo -e "\nStatus: $STATUS (EXPECTED_EMPTY=$EXPECTED_EMPTY)" || true
+          echo "===========================" || true
 
       # 上传结果文件
       - name: Upload judgment result
