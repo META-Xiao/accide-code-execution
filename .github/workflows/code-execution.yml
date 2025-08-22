@@ -81,10 +81,10 @@ jobs:
           
           # 修复可能的空格问题，将连续的 << 后面的空格保留
           sed -i 's/<<  *;/<< " ";/g' source_code_temp.txt || true
-          sed -i 's/<<  *)//<< " ")/g' source_code_temp.txt || true
+          sed -i 's/<<  *)/<< " ")/g' source_code_temp.txt || true
           sed -i 's/<<  *,/<< " ",/g' source_code_temp.txt || true
           sed -i 's/<<  *$/<< " "/g' source_code_temp.txt || true
-          sed -i 's/<<  *\]//<< " "]/g' source_code_temp.txt || true
+          sed -i 's/<<  *\]/<< " "]/g' source_code_temp.txt || true
           sed -i 's/<<  *}/<< " "}/g' source_code_temp.txt || true
           sed -i 's/<<  *>/<< " ">/g' source_code_temp.txt || true
           
@@ -232,9 +232,12 @@ jobs:
           echo "===========================" || true
 
       - name: Run Python Code
-        if: success() && github.event.inputs.language == 'python'
+        if: github.event.inputs.language == 'python'
         run: |
           set +e
+          
+          # 创建结果目录
+          mkdir -p ./results || true
 
           if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             EXPECTED_EMPTY=true
