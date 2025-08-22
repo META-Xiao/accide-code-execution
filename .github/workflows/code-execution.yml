@@ -232,9 +232,12 @@ jobs:
           echo "===========================" || true
 
       - name: Run Python Code
-        if: github.event.inputs.language == 'python'
+        if: always() && github.event.inputs.language == 'python'
         run: |
           set +e
+          
+          echo "=== PYTHON STEP STARTED ===" || true
+          echo "Language: ${{ github.event.inputs.language }}" || true
           
           # 创建结果目录
           mkdir -p ./results || true
