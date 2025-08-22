@@ -64,7 +64,11 @@ jobs:
           echo "===============================" || true
           
           # 根据语言确定源文件名
-          SOURCE_FILE="main.${{ github.event.inputs.language }}" || true
+          if [ "${{ github.event.inputs.language }}" = "java" ]; then
+            SOURCE_FILE="Main.java"
+          else
+            SOURCE_FILE="main.${{ github.event.inputs.language }}"
+          fi
           
           # 使用 base64 解码确保源代码中的空格和特殊字符被正确保留
           # 首先将源代码写入临时文件，然后检查并确保文件格式正确
@@ -80,7 +84,7 @@ jobs:
           sed -i 's/<<  *)//<< " ")/g' source_code_temp.txt || true
           sed -i 's/<<  *,/<< " ",/g' source_code_temp.txt || true
           sed -i 's/<<  *$/<< " "/g' source_code_temp.txt || true
-          sed -i 's/<<  *\]/<< " "]]/g' source_code_temp.txt || true
+          sed -i 's/<<  *\]//<< " "]/g' source_code_temp.txt || true
           sed -i 's/<<  *}/<< " "}/g' source_code_temp.txt || true
           sed -i 's/<<  *>/<< " ">/g' source_code_temp.txt || true
           
@@ -306,7 +310,7 @@ jobs:
         run: |
           set +e
           
-          javac main.java -d . &> ./results/compile.log || true
+          javac Main.java -d . &> ./results/compile.log || true
           COMPILE_RESULT=$?
           
           echo "=== Compilation Log ===" || true
