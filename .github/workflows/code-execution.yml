@@ -97,6 +97,9 @@ jobs:
           sed -i 's/>>  *}/>> " "}/g' source_code_temp.txt || true
           sed -i 's/>>  *>/>> " ">/g' source_code_temp.txt || true
           
+          # 修复Python语法错误：__main__ 需要引号
+          sed -i 's/__main__:/"__main__":/g' source_code_temp.txt || true
+          
           # 显示处理后的源代码
           echo "=== Source Code (After Processing) ===" || true
           cat source_code_temp.txt || true
@@ -234,13 +237,19 @@ jobs:
       - name: Run Python Code
         if: always() && github.event.inputs.language == 'python'
         run: |
-          set +e
-          
-          echo "=== PYTHON STEP STARTED ===" || true
-          echo "Language: ${{ github.event.inputs.language }}" || true
+          echo "=== PYTHON STEP STARTED ==="
+          echo "Language: ${{ github.event.inputs.language }}"
+          echo "Working directory: $(pwd)"
+          echo "Files in directory:"
+          ls -la
           
           # 创建结果目录
-          mkdir -p ./results || true
+          mkdir -p ./results
+          
+          # 检查main.py文件
+          echo "=== main.py content ==="
+          cat main.py
+          echo "======================="
 
           if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             EXPECTED_EMPTY=true
