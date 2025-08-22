@@ -32,6 +32,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 测试Python步骤是否会执行
+      - name: Debug Python Step Test
+        if: github.event.inputs.language == 'python'
+        run: |
+          echo "🐍 PYTHON DEBUG TEST STEP EXECUTED!"
+          echo "Language input: ${{ github.event.inputs.language }}"
+          echo "Current working directory: $(pwd)"
+          ls -la
+
       # 根据语言，将接收到的代码和输入写入文件
       - name: Prepare execution files
         run: |
