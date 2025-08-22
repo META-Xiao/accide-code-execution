@@ -39,7 +39,7 @@ jobs:
           echo "Language input: '${{ github.event.inputs.language }}'"
           echo "Is language python? $([[ '${{ github.event.inputs.language }}' == 'python' ]] && echo 'YES' || echo 'NO')"
           echo "Default language: cpp"
-          if [[ "${{ github.event.inputs.language }}" == "python" ]]; then
+          if [[ "${{ github.event.inputs.language }}" == "python" ]] || [[ "${{ github.event.inputs.language }}" == "py" ]]; then
             echo "🐍 PYTHON DETECTED - Python steps should execute"
           else
             echo "❌ NOT PYTHON - Python steps will be skipped"
@@ -80,6 +80,8 @@ jobs:
           # 根据语言确定源文件名
           if [ "${{ github.event.inputs.language }}" = "java" ]; then
             SOURCE_FILE="Main.java"
+          elif [ "${{ github.event.inputs.language }}" = "python" ] || [ "${{ github.event.inputs.language }}" = "py" ]; then
+            SOURCE_FILE="main.py"
           else
             SOURCE_FILE="main.${{ github.event.inputs.language }}"
           fi
@@ -249,7 +251,7 @@ jobs:
           echo "===========================" || true
 
       - name: Run Python Code
-        if: always() && github.event.inputs.language == 'python'
+        if: always() && (github.event.inputs.language == 'python' || github.event.inputs.language == 'py')
         run: |
           echo "=== PYTHON STEP STARTED ==="
           echo "Language: ${{ github.event.inputs.language }}"
