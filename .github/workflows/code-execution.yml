@@ -32,38 +32,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 测试Python步骤是否会执行
-      - name: Debug Python Step Test
-        run: |
-          echo "🔍 DEBUG: Language parameter check"
-          echo "Language input: '${{ github.event.inputs.language }}'"
-          echo "Is language python? $([[ '${{ github.event.inputs.language }}' == 'python' ]] && echo 'YES' || echo 'NO')"
-          echo "Default language: cpp"
-          if [[ "${{ github.event.inputs.language }}" == "python" ]] || [[ "${{ github.event.inputs.language }}" == "py" ]]; then
-            echo "🐍 PYTHON DETECTED - Python steps should execute"
-          else
-            echo "❌ NOT PYTHON - Python steps will be skipped"
-            echo "Current language: '${{ github.event.inputs.language }}'"
-          fi
-
       # 根据语言，将接收到的代码和输入写入文件
       - name: Prepare execution files
         run: |
-          # 禁用错误导致的脚本终止
           set +e
-          
-          # 创建一个结果目录
           mkdir -p results || true
-
-          # 设置 UTF-8 环境变量
           export LC_ALL=C.UTF-8 || true
           export LANG=C.UTF-8 || true
-          
-          # 将输入写入文件，使用 echo -e 确保转义序列被正确处理
           echo -e "${{ github.event.inputs.std_input }}" > input.txt || true
           echo -e "${{ github.event.inputs.expected_output }}" > expected.txt || true
           
-          # 检查预期输出是否为空，设置一个标志
+
           if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             echo "EXPECTED_EMPTY=true" >> $GITHUB_ENV || true
             echo "预期输出为空，设置 EXPECTED_EMPTY=true" || true
@@ -72,12 +51,10 @@ jobs:
             echo "预期输出不为空，设置 EXPECTED_EMPTY=false" || true
           fi
           
-          # 显示预期输出内容
           echo "=== Expected Output Content ===" || true
           cat expected.txt || true
           echo "===============================" || true
-          
-          # 根据语言确定源文件名
+
           if [ "${{ github.event.inputs.language }}" = "java" ]; then
             SOURCE_FILE="Main.java"
           elif [ "${{ github.event.inputs.language }}" = "python" ] || [ "${{ github.event.inputs.language }}" = "py" ]; then
@@ -90,7 +67,6 @@ jobs:
           # 首先将源代码写入临时文件，然后检查并确保文件格式正确
           echo "${{ github.event.inputs.source_code }}" > source_code_temp.txt || true
           
-          # 显示处理前的源代码
           echo "=== Source Code (Before Processing) ===" || true
           cat source_code_temp.txt || true
           echo "=====================================" || true
@@ -116,12 +92,9 @@ jobs:
           # 修复Python语法错误：__main__ 需要引号
           sed -i 's/__main__:/"__main__":/g' source_code_temp.txt || true
           
-          # 显示处理后的源代码
           echo "=== Source Code (After Processing) ===" || true
           cat source_code_temp.txt || true
           echo "====================================" || true
-          
-          # 将处理后的源代码写入最终文件
           cat source_code_temp.txt > $SOURCE_FILE || true
           
           # 确保源代码文件是 UTF-8 编码
@@ -131,13 +104,9 @@ jobs:
           echo "=========================" || true
           
           echo "SOURCE_FILE=$SOURCE_FILE" >> $GITHUB_ENV || true
-          
-          # 显示源代码文件内容以进行调试
           echo "=== Final Source Code ===" || true
           cat $SOURCE_FILE || true
           echo "========================" || true
-          
-          # 检查文件编码
           echo "=== File Encoding ===" || true
           file -i $SOURCE_FILE || true
           echo "====================" || true
@@ -148,15 +117,11 @@ jobs:
         run: |
           set +e
           g++ --version || true
-          
-          # 创建编译日志目录
           mkdir -p ./results || true
           
-          # 尝试编译代码
           g++ main.cpp -o main_exec -O2 -std=c++17 -Wall -Wextra -fdiagnostics-color=always > ./results/compile.log 2>&1
           COMPILE_RESULT=$?
           
-          # 输出编译日志
           echo "=== Compilation Log ===" || true
           cat ./results/compile.log || true
           echo "=======================" || true
@@ -195,7 +160,6 @@ jobs:
           
           chmod +x time_wrapper.sh
           
-          # 运行文件并限制时间和内存
           # TLE: 2 seconds, MLE: 256 MB
           timeout 2s ./time_wrapper.sh ./main_exec < input.txt > ./results/actual.txt 2> ./results/stderr.log || true
           EXIT_CODE=$?
@@ -251,21 +215,10 @@ jobs:
           echo "===========================" || true
 
       - name: Run Python Code
-        if: always() && (github.event.inputs.language == 'python' || github.event.inputs.language == 'py')
+        if: github.event.inputs.language == 'python' || github.event.inputs.language == 'py'
         run: |
-          echo "=== PYTHON STEP STARTED ==="
-          echo "Language: ${{ github.event.inputs.language }}"
-          echo "Working directory: $(pwd)"
-          echo "Files in directory:"
-          ls -la
-          
-          # 创建结果目录
-          mkdir -p ./results
-          
-          # 检查main.py文件
-          echo "=== main.py content ==="
-          cat main.py
-          echo "======================="
+          set +e
+          mkdir -p ./results || true
 
           if [ ! -s expected.txt ] || [ "$(cat expected.txt | tr -d '[:space:]')" = "" ]; then
             EXPECTED_EMPTY=true
