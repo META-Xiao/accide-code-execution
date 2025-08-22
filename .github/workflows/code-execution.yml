@@ -34,12 +34,17 @@ jobs:
 
       # 测试Python步骤是否会执行
       - name: Debug Python Step Test
-        if: github.event.inputs.language == 'python'
         run: |
-          echo "🐍 PYTHON DEBUG TEST STEP EXECUTED!"
-          echo "Language input: ${{ github.event.inputs.language }}"
-          echo "Current working directory: $(pwd)"
-          ls -la
+          echo "🔍 DEBUG: Language parameter check"
+          echo "Language input: '${{ github.event.inputs.language }}'"
+          echo "Is language python? $([[ '${{ github.event.inputs.language }}' == 'python' ]] && echo 'YES' || echo 'NO')"
+          echo "Default language: cpp"
+          if [[ "${{ github.event.inputs.language }}" == "python" ]]; then
+            echo "🐍 PYTHON DETECTED - Python steps should execute"
+          else
+            echo "❌ NOT PYTHON - Python steps will be skipped"
+            echo "Current language: '${{ github.event.inputs.language }}'"
+          fi
 
       # 根据语言，将接收到的代码和输入写入文件
       - name: Prepare execution files
